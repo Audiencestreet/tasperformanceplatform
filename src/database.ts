@@ -75,12 +75,12 @@ export class Database {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING *
     `).bind(
-      lead.campaign_id, lead.affiliate_id, lead.lead_uuid, lead.px_lead_id,
-      lead.first_name, lead.last_name, lead.email, lead.phone_number, lead.zip_code,
-      lead.ownership, lead.roof_shade, lead.electricity_bill, lead.ip_address,
-      lead.user_agent, lead.referrer, lead.utm_source, lead.utm_medium, 
-      lead.utm_campaign, lead.utm_term, lead.utm_content, lead.ping_status,
-      lead.post_status, lead.ping_response, lead.post_response
+      lead.campaign_id, lead.affiliate_id, lead.lead_uuid, lead.px_lead_id || null,
+      lead.first_name, lead.last_name, lead.email || null, lead.phone_number, lead.zip_code,
+      lead.ownership || null, lead.roof_shade || null, lead.electricity_bill || null, lead.ip_address || null,
+      lead.user_agent || null, lead.referrer || null, lead.utm_source || null, lead.utm_medium || null, 
+      lead.utm_campaign || null, lead.utm_term || null, lead.utm_content || null, lead.ping_status || 'pending',
+      lead.post_status || 'pending', lead.ping_response || null, lead.post_response || null
     ).first<Lead>();
     
     if (!result) {
@@ -93,7 +93,7 @@ export class Database {
     const setClause = Object.keys(updates).map(key => `${key} = ?`).join(', ');
     const values = Object.values(updates);
     
-    await this.db.prepare(`UPDATE leads SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    await this.db.prepare(`UPDATE leads SET ${setClause} WHERE id = ?`)
       .bind(...values, id).run();
   }
   
