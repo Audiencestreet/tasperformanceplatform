@@ -660,6 +660,14 @@ app.post('/api/postbacks', async (c) => {
 // Create new campaign
 app.post('/api/campaigns', async (c) => {
   try {
+    // Check if database is available
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please set up D1 database.' 
+      }, 503);
+    }
+    
     const campaignData = await c.req.json();
     const db = new Database(c.env.DB);
     
@@ -699,8 +707,8 @@ app.post('/api/campaigns', async (c) => {
     console.error('Error creating campaign:', error);
     return c.json<ApiResponse>({ 
       success: false, 
-      error: 'Failed to create campaign' 
-    }, 500);
+      error: 'Database service unavailable. Please contact administrator.' 
+    }, 503);
   }
 });
 
@@ -741,12 +749,24 @@ app.get('/api/campaigns/:id', async (c) => {
 // Get all campaigns
 app.get('/api/campaigns', async (c) => {
   try {
+    // Check if database is available
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
     const db = new Database(c.env.DB);
     const campaigns = await db.getAllCampaigns();
     
     return c.json<ApiResponse<Campaign[]>>({ success: true, data: campaigns });
   } catch (error) {
-    return c.json<ApiResponse>({ success: false, error: 'Internal server error' }, 500);
+    console.error('Campaigns API error:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Database service unavailable. Please contact administrator.' 
+    }, 503);
   }
 });
 

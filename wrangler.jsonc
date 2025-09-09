@@ -5,5 +5,12 @@
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
     "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "affiliate-tracker-production",
+      "database_id": "12df94e6-bee0-40b5-9fff-7f64ccfde4fc"
+    }
   ]
 }

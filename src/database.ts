@@ -3,6 +3,21 @@ import { Bindings, Lead, Campaign, Affiliate, AnalyticsData, DashboardStats } fr
 export class Database {
   constructor(private db: D1Database) {}
   
+  // Check if database is available
+  private async checkDatabase(): Promise<boolean> {
+    try {
+      if (!this.db) {
+        return false;
+      }
+      // Simple test query
+      await this.db.prepare('SELECT 1').first();
+      return true;
+    } catch (error) {
+      console.error('Database unavailable:', error);
+      return false;
+    }
+  }
+  
   // Affiliate methods
   async createAffiliate(affiliate: Omit<Affiliate, 'id' | 'created_at' | 'updated_at'>): Promise<Affiliate> {
     const result = await this.db.prepare(`
