@@ -30,6 +30,24 @@ export class Database {
     return result.results;
   }
   
+  async updateAffiliate(id: number, updates: Partial<Affiliate>): Promise<Affiliate | null> {
+    // Add updated_at to the updates
+    const updatesWithTimestamp = {
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    
+    const setClause = Object.keys(updatesWithTimestamp).map(key => `${key} = ?`).join(', ');
+    const values = Object.values(updatesWithTimestamp);
+    
+    const result = await this.db.prepare(`
+      UPDATE affiliates SET ${setClause} WHERE id = ?
+      RETURNING *
+    `).bind(...values, id).first<Affiliate>();
+    
+    return result || null;
+  }
+  
   // Campaign methods
   async createCampaign(campaign: Omit<Campaign, 'id' | 'created_at' | 'updated_at'>): Promise<Campaign> {
     const result = await this.db.prepare(`
@@ -231,6 +249,112 @@ export class Database {
     ).run();
   }
   
+  // Tracking methods
+  async logTrackingLink(trackingData: {
+    click_id: string;
+    campaign_id: number;
+    sub_id: string;
+    landing_url: string;
+    tracking_url: string;
+    created_at: string;
+  }): Promise<void> {
+    await this.db.prepare(`
+      INSERT INTO tracking_links (click_id, campaign_id, sub_id, landing_url, tracking_url, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(
+      trackingData.click_id,
+      trackingData.campaign_id,
+      trackingData.sub_id,
+      trackingData.landing_url,
+      trackingData.tracking_url,
+      trackingData.created_at
+    ).run();
+  }
+
+  async logClick(clickData: {
+    click_id: string;
+    campaign_id: number;
+    sub_id: string;
+    landing_url: string;
+    ip_address: string;
+    user_agent: string;
+    referrer: string;
+    clicked_at: string;
+  }): Promise<void> {
+    await this.db.prepare(`
+      INSERT INTO clicks (click_id, campaign_id, sub_id, landing_url, ip_address, user_agent, referrer, clicked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      clickData.click_id,
+      clickData.campaign_id,
+      clickData.sub_id,
+      clickData.landing_url,
+      clickData.ip_address,
+      clickData.user_agent,
+      clickData.referrer,
+      clickData.clicked_at
+    ).run();
+  }
+
+  // Campaign postback parameters methods
+  async createCampaignPostbackParam(param: {
+    campaign_id: number;
+    parameter_name: string;
+    parameter_value: string;
+    description?: string | null;
+  }): Promise<any> {
+    const result = await this.db.prepare(`
+      INSERT INTO campaign_postback_params (campaign_id, parameter_name, parameter_value, description)
+      VALUES (?, ?, ?, ?)
+      RETURNING *
+    `).bind(
+      param.campaign_id,
+      param.parameter_name,
+      param.parameter_value,
+      param.description || null
+    ).first();
+    
+    if (!result) {
+      throw new Error('Failed to create campaign postback parameter');
+    }
+    return result;
+  }
+
+  async getCampaignPostbackParams(campaignId: number): Promise<any[]> {
+    const result = await this.db.prepare(`
+      SELECT * FROM campaign_postback_params 
+      WHERE campaign_id = ? 
+      ORDER BY created_at DESC
+    `).bind(campaignId).all();
+    
+    return result.results;
+  }
+
+  async updateCampaignPostbackParam(paramId: number, updates: any): Promise<any | null> {
+    const updatesWithTimestamp = {
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    
+    const setClause = Object.keys(updatesWithTimestamp).map(key => `${key} = ?`).join(', ');
+    const values = Object.values(updatesWithTimestamp);
+    
+    const result = await this.db.prepare(`
+      UPDATE campaign_postback_params SET ${setClause} WHERE id = ?
+      RETURNING *
+    `).bind(...values, paramId).first();
+    
+    return result || null;
+  }
+
+  async deleteCampaignPostbackParam(paramId: number): Promise<boolean> {
+    const result = await this.db.prepare(`
+      DELETE FROM campaign_postback_params WHERE id = ?
+    `).bind(paramId).run();
+    
+    return result.changes > 0;
+  }
+
   // Utility methods
   async getRecentActivity(limit: number = 50): Promise<any[]> {
     const result = await this.db.prepare(`

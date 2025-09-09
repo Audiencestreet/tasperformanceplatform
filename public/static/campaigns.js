@@ -97,6 +97,10 @@ class CampaignManager {
                                 class="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200">
                             <i class="fas fa-link mr-1"></i>Tracking Link
                         </button>
+                        <button onclick="campaignManager.managePostbackParams(${campaign.id})" 
+                                class="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200">
+                            <i class="fas fa-cog mr-1"></i>Postback Config
+                        </button>
                     </div>
                 </div>
             </div>
@@ -254,6 +258,181 @@ class CampaignManager {
                 notification.remove();
             }
         }, 3000);
+    }
+    
+    async managePostbackParams(campaignId) {
+        try {
+            const [campaignResponse, paramsResponse] = await Promise.all([
+                axios.get(`/api/campaigns/${campaignId}`),
+                axios.get(`/api/campaigns/${campaignId}/postback-params`)
+            ]);
+            
+            if (campaignResponse.data.success && paramsResponse.data.success) {
+                this.showPostbackParamsModal(campaignId, campaignResponse.data.data, paramsResponse.data.data);
+            }
+        } catch (error) {
+            console.error('Error loading postback parameters:', error);
+            this.showNotification('Failed to load postback configuration', 'error');
+        }
+    }
+    
+    showPostbackParamsModal(campaignId, campaign, params) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <i class="fas fa-cog mr-2"></i>Postback Parameters - ${campaign.name}
+                        </h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Add Parameter Form -->
+                    <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                        <h4 class="font-medium text-gray-900 mb-3">Add New Parameter</h4>
+                        <form id="postback-param-form-${campaignId}" class="space-y-3">
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Parameter Name</label>
+                                    <input type="text" name="parameter_name" placeholder="e.g., click_id, sub_id" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Parameter Value</label>
+                                    <input type="text" name="parameter_value" placeholder="e.g., {click_id}, {sub_id}" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                                <input type="text" name="description" placeholder="What this parameter is used for" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            </div>
+                            <button type="submit" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                                <i class="fas fa-plus mr-1"></i>Add Parameter
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Existing Parameters -->
+                    <div>
+                        <h4 class="font-medium text-gray-900 mb-3">Configured Parameters</h4>
+                        <div id="postback-params-list-${campaignId}" class="space-y-2">
+                            ${params.length > 0 ? 
+                                params.map(param => this.renderPostbackParam(campaignId, param)).join('') :
+                                '<p class="text-gray-500 text-sm">No parameters configured yet.</p>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Example Postback URLs -->
+                    <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                        <h4 class="font-medium text-blue-900 mb-2">
+                            <i class="fas fa-info-circle mr-1"></i>Example Postback URL Format
+                        </h4>
+                        <p class="text-sm text-blue-800 mb-2">Configure parameters above, then use them in your postback URLs like this:</p>
+                        <code class="text-xs bg-blue-100 text-blue-900 p-2 rounded block">
+                            https://your-network.com/postback?${params.length > 0 ? 
+                                params.map(p => `${p.parameter_name}=${p.parameter_value}`).join('&') : 
+                                'click_id={click_id}&payout={payout}&status={status}'
+                            }
+                        </code>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Setup form submission
+        const form = document.getElementById(`postback-param-form-${campaignId}`);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.createPostbackParam(campaignId, form);
+        });
+    }
+    
+    renderPostbackParam(campaignId, param) {
+        return `
+            <div class="flex items-center justify-between p-3 bg-white border border-gray-200 rounded">
+                <div class="flex-1">
+                    <div class="flex items-center space-x-3">
+                        <span class="font-medium text-sm">${param.parameter_name}</span>
+                        <span class="text-gray-400">→</span>
+                        <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded">${param.parameter_value}</span>
+                    </div>
+                    ${param.description ? `<p class="text-xs text-gray-500 mt-1">${param.description}</p>` : ''}
+                </div>
+                <button onclick="campaignManager.deletePostbackParam(${campaignId}, ${param.id})" 
+                        class="text-red-600 hover:text-red-800 text-sm">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+    }
+    
+    async createPostbackParam(campaignId, form) {
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        if (!data.parameter_name || !data.parameter_value) {
+            this.showNotification('Parameter name and value are required', 'error');
+            return;
+        }
+        
+        try {
+            const response = await axios.post(`/api/campaigns/${campaignId}/postback-params`, data);
+            if (response.data.success) {
+                this.showNotification('Parameter added successfully', 'success');
+                
+                // Refresh the parameter list
+                const paramsResponse = await axios.get(`/api/campaigns/${campaignId}/postback-params`);
+                if (paramsResponse.data.success) {
+                    const listContainer = document.getElementById(`postback-params-list-${campaignId}`);
+                    const params = paramsResponse.data.data;
+                    listContainer.innerHTML = params.length > 0 ? 
+                        params.map(param => this.renderPostbackParam(campaignId, param)).join('') :
+                        '<p class="text-gray-500 text-sm">No parameters configured yet.</p>';
+                }
+                
+                // Clear form
+                form.reset();
+            }
+        } catch (error) {
+            console.error('Error creating postback parameter:', error);
+            this.showNotification('Failed to add parameter', 'error');
+        }
+    }
+    
+    async deletePostbackParam(campaignId, paramId) {
+        if (!confirm('Are you sure you want to delete this parameter?')) {
+            return;
+        }
+        
+        try {
+            const response = await axios.delete(`/api/campaigns/${campaignId}/postback-params/${paramId}`);
+            if (response.data.success) {
+                this.showNotification('Parameter deleted successfully', 'success');
+                
+                // Refresh the parameter list
+                const paramsResponse = await axios.get(`/api/campaigns/${campaignId}/postback-params`);
+                if (paramsResponse.data.success) {
+                    const listContainer = document.getElementById(`postback-params-list-${campaignId}`);
+                    const params = paramsResponse.data.data;
+                    listContainer.innerHTML = params.length > 0 ? 
+                        params.map(param => this.renderPostbackParam(campaignId, param)).join('') :
+                        '<p class="text-gray-500 text-sm">No parameters configured yet.</p>';
+                }
+            }
+        } catch (error) {
+            console.error('Error deleting postback parameter:', error);
+            this.showNotification('Failed to delete parameter', 'error');
+        }
     }
     
     showError(message) {

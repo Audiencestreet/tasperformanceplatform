@@ -1,286 +1,180 @@
-# Affiliate Tracking Platform
+# 360° Affiliate Tracking Platform with PX Direct Post Integration
 
 ## Project Overview
-- **Name**: 360° Affiliate Tracking Platform
-- **Goal**: Comprehensive lead tracking and management system with PX API integration
-- **Features**: Real-time lead capture, automated ping/post workflows, analytics dashboard, campaign management
+- **Name**: Comprehensive Affiliate Tracking Platform
+- **Goal**: Complete affiliate marketing tracking solution with PX API Direct Post integration
+- **Features**: Click tracking, lead management, postback integration, conversion tracking, PX Direct Post API
 
-## URLs
-- **Local Development**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev
-- **Dashboard**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev/
-- **Campaign Management**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev/campaigns
-- **API Health Check**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev/api/dashboard/stats
+## ✅ Currently Completed Features
 
-## Data Architecture
+### Core Tracking System
+- **✅ Tracking Link Generation**: Dynamic tracking links with unique click IDs
+- **✅ Click Tracking**: Real-time click logging with IP, user agent, referrer data
+- **✅ ADT Campaign Integration**: Special tracking format for ADT Home Security campaigns
+- **✅ Campaign Management**: Full CRUD operations for campaigns with postback parameters
+- **✅ Affiliate Management**: Complete affiliate management system with API keys
 
-### Data Models
-- **Affiliates**: Partners who generate leads
-- **Campaigns**: Traffic sources with specific configurations (SubId, OfferId, traffic type)
-- **Leads**: Individual lead records with complete tracking data
-- **Lead Events**: Lifecycle tracking (ping sent, accepted, posted, etc.)
-- **Analytics**: Daily aggregated metrics and performance data
-- **API Logs**: Complete audit trail of all PX API interactions
+### PX Direct Post Integration (NEW)
+- **✅ Direct Post API Client**: Updated PX API client using Direct Post endpoint
+- **✅ Health & Solar Vertical Support**: Specialized methods for Health and Solar verticals
+- **✅ SubId Strategy**: Updated SubId generation (≤20 total per account)
+  - Email: EM01, EM02
+  - Social: FB01, IG01, TT01, TW01  
+  - Native/Search: TB01, OB01, GG01
+- **✅ Environment Variables**: Production API token management
+- **✅ Test Interface**: Comprehensive PX API test page with form validation
+- **✅ API Endpoints**: 
+  - `/api/px/direct-post` - Direct Post testing
+  - `/api/px/subids` - SubId mappings
+  - `/api/px/subid/generate` - SubId generation
+
+### Dashboard & Analytics
+- **✅ Real-time Dashboard**: Stats cards with lead counts, rates, revenue
+- **✅ Campaign Analytics**: Performance metrics by campaign and affiliate
+- **✅ Conversion Tracking**: Multi-platform conversion tracking (Google, Facebook, TikTok)
+- **✅ Postback System**: Configurable postback URLs with custom parameters
+
+## 🌍 Production URLs
+- **Live Application**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev
+- **PX Test Interface**: https://3000-ij2h1e6pzy3g67a52hvcw-6532622b.e2b.dev/px-test
+- **GitHub Repository**: [To be deployed]
+
+## 🛠 Current Functional API Endpoints
+
+### Tracking System
+- **POST** `/api/tracking/generate` - Generate tracking links
+  - Params: `campaign_id`, `sub_id`, `landing_url`
+  - Returns: Tracking link with ADT detection
+- **GET** `/track/click` - Click tracking redirect
+  - Params: `c` (campaign), `s` (subId), `id` (clickId), `url` (landing)
+
+### PX Direct Post API
+- **POST** `/api/px/direct-post` - Test PX Direct Post
+  - Body: `vertical`, `subId`, `contact`, `context`, `extras`
+  - Returns: PX API response with success/error details
+- **GET** `/api/px/subids` - Get all SubId mappings
+- **POST** `/api/px/subid/generate` - Generate valid SubIds
+  - Body: `trafficType`, `campaignNumber`
+
+### Affiliate Management
+- **POST** `/api/affiliates` - Create affiliate (auto-generates API key)
+- **GET** `/api/affiliates` - List all affiliates
+- **GET** `/api/affiliates/:id` - Get affiliate details
+- **PUT** `/api/affiliates/:id` - Update affiliate
+
+### Campaign Management  
+- **POST** `/api/campaigns` - Create campaign
+- **GET** `/api/campaigns` - List all campaigns
+- **GET** `/api/campaigns/:id` - Get campaign details
+- **POST** `/api/campaigns/:id/postback-params` - Add postback parameters
+
+### Analytics & Reporting
+- **GET** `/api/dashboard/stats` - Dashboard statistics
+- **GET** `/api/dashboard/activity` - Recent activity
+- **POST** `/api/leads` - Lead submission with PX processing
+
+## 📊 Data Architecture
+
+### Database (Cloudflare D1)
+- **Core Tables**: `affiliates`, `campaigns`, `leads` 
+- **Tracking Tables**: `tracking_links`, `clicks`, `campaign_postback_params`
+- **Analytics Tables**: `conversions`, `postback_logs`, `api_calls`
+- **Migrations**: Located in `/migrations/` directory
 
 ### Storage Services
-- **Cloudflare D1 SQLite**: Primary relational database for all structured data
-- **Local Development**: Uses `.wrangler/state/v3/d1` for local SQLite database
-- **Production Ready**: Configured for Cloudflare D1 production deployment
+- **D1 Database**: SQLite-based for relational data
+- **Local Development**: Uses `--local` flag for offline development
+- **Production**: Cloudflare D1 globally distributed database
 
-### Data Flow
-1. Lead captured via web form → Stored in leads table
-2. Campaign and affiliate data retrieved → SubId validation
-3. PX API ping sent → Response logged to api_logs
-4. If accepted → PX API post sent within 15 seconds
-5. All events tracked → lead_events table
-6. Daily analytics aggregated → analytics table
+### PX API Integration
+- **Endpoint**: https://leadapi.px.com/api/lead/directpost
+- **Health Token**: F9F9B3CC-85D8-4142-9007-61F784C1F098
+- **Solar Token**: B593425D-90C7-4CB8-8952-605D8A0CCEC0
+- **Authentication**: API token in payload (ApiToken field)
+- **Verticals**: Health, Solar, Home support
 
-## Current Features Implemented
+## 📋 Features Not Yet Implemented
 
-### ✅ Core Functionality
-- **Lead Capture Form**: Full solar-specific form with validation
-- **PX API Integration**: Complete ping/post workflow implementation
-- **Campaign Management**: View all campaigns, stats, and tracking links
-- **Real-time Dashboard**: Live stats and recent activity feed
-- **Database Schema**: Complete data model with relationships and indexes
+### PX Integration Issues
+- **⚠️ PX API Authentication**: Currently receiving "Input data is not a valid JSON" error
+  - API returns 200 status but validation fails
+  - May need different authentication method or payload structure
+  - Requires further investigation with PX support
 
-### ✅ API Endpoints
-- `POST /api/leads` - Submit new lead and process with PX API
-- `GET /api/leads/:id` - Get specific lead details
-- `GET /api/campaigns` - List all campaigns
-- `GET /api/campaigns/:id` - Get specific campaign details
-- `GET /api/dashboard/stats` - Dashboard statistics
-- `GET /api/dashboard/activity` - Recent activity feed
-- `POST /api/test-px` - Test PX API connection
+### Advanced Features (Future)
+- **Multi-vertical Landing Pages**: Custom landing pages for Health/Solar
+- **Real-time Analytics Dashboard**: Live charts and metrics
+- **Advanced Postback Routing**: Conditional postback routing logic
+- **A/B Testing Framework**: Campaign split testing capabilities
+- **Fraud Detection**: Click fraud and lead quality scoring
 
-### ✅ PX API Features
-- **Ping/Post Workflow**: Automated 15-second window handling
-- **Error Handling**: Comprehensive error tracking and logging
-- **SubId Validation**: Format checking per PX requirements
-- **API Logging**: Complete request/response audit trail
-- **Timeout Management**: Proper handling of API timeouts
+## 🚀 Recommended Next Steps
 
-### ✅ Dashboard Features
-- **Live Statistics**: Total leads, acceptance rate, success rate, revenue
-- **Activity Feed**: Real-time lead processing status
-- **Campaign Selection**: Dynamic campaign dropdown
-- **Form Validation**: Client and server-side validation
-- **Responsive Design**: Mobile-friendly interface
+### Immediate Priority (PX Integration)
+1. **Debug PX API Authentication**:
+   - Verify correct API token format and authentication method
+   - Check if endpoint requires different payload structure
+   - Test with PX support team if needed
+   - Consider using curl directly against PX API for debugging
 
-## Features Not Yet Implemented
+2. **Alternative Testing**:
+   - Test with Health vertical using health token
+   - Try different payload structures based on PX documentation
+   - Implement retry logic and better error handling
 
-### 🔄 Advanced Analytics
-- Revenue calculations based on successful posts
-- Campaign performance comparisons
-- Traffic source ROI analysis
-- Custom date range filtering
-- Export functionality
+### Development Enhancements
+3. **Environment Setup**:
+   - Deploy to Cloudflare Pages production
+   - Configure production environment variables
+   - Set up GitHub repository integration
 
-### 🔄 Admin Panel
-- Affiliate management (create/edit/delete)
-- Campaign configuration interface
-- API token management
-- User authentication system
+4. **Testing & Validation**:
+   - Create comprehensive test suite for PX integration
+   - Add validation for all PX field mappings
+   - Implement lead quality scoring
 
-### 🔄 Advanced PX Features
-- Multiple offer support
-- Dynamic SubId generation
-- A/B testing for campaigns
-- Webhook notifications
+5. **UI/UX Improvements**:
+   - Enhance PX test interface with better error handling
+   - Add real-time success/failure indicators
+   - Create campaign-specific landing page generators
 
-## User Guide
+## 🔧 Tech Stack & Deployment
+- **Framework**: Hono + TypeScript (Cloudflare Workers)
+- **Frontend**: Vanilla JavaScript + Tailwind CSS
+- **Database**: Cloudflare D1 (SQLite)
+- **Deployment**: Cloudflare Pages
+- **Development**: PM2 + Wrangler local development
+- **Version Control**: Git (ready for GitHub integration)
+
+## 🔗 User Guide
 
 ### For Affiliates
-1. **Access Dashboard**: Visit the main URL to see overview stats
-2. **Submit Leads**: Use the lead capture form with all required solar data
-3. **Track Performance**: Monitor real-time status in the activity feed
-4. **View Campaigns**: Navigate to `/campaigns` to see all available campaigns
+1. **Get Started**: Visit the main dashboard
+2. **Create Campaigns**: Use campaign management to set up tracking
+3. **Generate Links**: Use tracking link generator with your SubIds
+4. **Monitor Performance**: View real-time analytics and conversion data
+5. **Test PX API**: Use PX Test page to validate lead submissions
 
-### For Lead Submission
-Required fields:
-- **Contact Info**: First name, last name, phone, zip code
-- **Solar Data**: Home ownership, roof shade, monthly electric bill
-- **Campaign**: Select from active campaigns dropdown
+### For Administrators  
+1. **Manage Affiliates**: Create and manage affiliate accounts
+2. **Configure Postbacks**: Set up postback URLs with custom parameters
+3. **Monitor System**: View dashboard for system-wide analytics
+4. **Debug Issues**: Use PX Test interface for troubleshooting
 
-The system automatically:
-- Validates all input data
-- Sends ping to PX API
-- If accepted, sends post within 15 seconds
-- Tracks all events and responses
-- Updates dashboard statistics
-
-### For Campaign Management
-- **View Stats**: Click "Stats" button on any campaign card
-- **Get Tracking Links**: Click "Tracking Link" to generate UTM-tagged URLs
-- **Monitor Performance**: Real-time acceptance and success rates
-
-## Technical Stack
-
-### Backend
-- **Framework**: Hono (lightweight, fast)
-- **Runtime**: Cloudflare Workers
-- **Database**: Cloudflare D1 (SQLite)
-- **API**: RESTful with JSON responses
-- **Validation**: Server-side input validation
-
-### Frontend
-- **Styling**: TailwindCSS via CDN
-- **Icons**: FontAwesome
-- **HTTP**: Axios for API calls
-- **UI**: Vanilla JavaScript with modern ES6+
-
-### Development
-- **Build Tool**: Vite
-- **TypeScript**: Full type safety
-- **Process Manager**: PM2 for development
-- **Database Migrations**: Wrangler D1 migrations
-
-## Deployment
-
-### Platform
-- **Platform**: Cloudflare Pages
-- **Status**: ✅ Development Active
-- **Tech Stack**: Hono + TypeScript + TailwindCSS + D1
-- **Last Updated**: 2025-09-08
-
-### Local Development Setup
-```bash
-# Install dependencies
-npm install
-
-# Apply database migrations
-npm run db:migrate:local
-
-# Seed with sample data
-npm run db:seed
-
-# Build the application
-npm run build
-
-# Start development server
-pm2 start ecosystem.config.cjs
-
-# View logs
-pm2 logs affiliate-tracker --nostream
-```
-
-### Production Deployment
-```bash
-# Create production D1 database
-wrangler d1 create webapp-production
-
-# Apply migrations to production
-npm run db:migrate:prod
-
-# Build and deploy
-npm run deploy:prod
-```
-
-## Environment Configuration
-
-### Required Environment Variables
-- `PX_API_TOKEN`: Production PX API token (stored in Cloudflare secrets)
-- `PX_OFFER_ID`: Production offer ID (default: 122 for testing)
-- `PX_DID`: Production DID number (default: +18576880648 for testing)
-
-### PX API Configuration
-- **Ping URL**: https://leadapi.px.com/api/call/ping
-- **Post URL**: https://leadapi.px.com/api/call/post
-- **Test Offer ID**: 122
-- **Test DID**: +18576880648
-
-## Database Schema
-
-### Key Tables
-- `affiliates` - Partner information and API keys
-- `campaigns` - Campaign configurations with PX mapping
-- `leads` - Complete lead records with tracking data
-- `lead_events` - Event timeline for each lead
-- `analytics` - Daily aggregated performance metrics
-- `api_logs` - Complete API interaction audit trail
-
-### Sample Data Included
-- 3 sample affiliates
-- 4 active campaigns (Facebook, Google, Social, Search)
-- 5 test leads with various statuses
-- Historical analytics data
-
-## API Documentation
-
-### Lead Submission
-```javascript
-POST /api/leads
-Content-Type: application/json
-
-{
-  "first_name": "John",
-  "last_name": "Doe", 
-  "email": "john@example.com",
-  "phone_number": "+15551234567",
-  "zip_code": "90210",
-  "ownership": "Own",
-  "roof_shade": "No Shade",
-  "electricity_bill": "$150-200",
-  "campaign_id": "1"
-}
-```
-
-### Response Format
-```javascript
-{
-  "success": true,
-  "data": {
-    "lead_id": 123,
-    "lead_uuid": "550e8400-e29b-41d4-a716-446655440000",
-    "ping_status": "accepted",
-    "post_status": "posted", 
-    "px_result": {
-      "ping_accepted": true,
-      "post_successful": true,
-      "errors": []
-    }
-  },
-  "message": "Lead submitted successfully"
-}
-```
-
-## Security & Compliance
-
-### Data Protection
-- All PII encrypted in transit
-- API tokens stored securely in Cloudflare secrets
-- Input validation and sanitization
-- SQL injection protection via prepared statements
-
-### PX API Compliance
-- Follows exact ping/post workflow requirements
-- 15-second window enforcement
-- Required solar data fields included
-- SubId format validation per specifications
-
-## Monitoring & Analytics
-
-### Real-time Metrics
-- Total leads processed
-- Ping acceptance rate  
-- Post success rate
-- Revenue tracking (when configured)
-
-### Logging
-- Complete API request/response logging
-- Error tracking with stack traces
-- Performance monitoring
-- Lead lifecycle events
-
-## Support & Maintenance
-
-### Troubleshooting
-- Check PM2 logs: `pm2 logs affiliate-tracker --nostream`
-- Verify database: `npm run db:console:local`
-- Test API health: `curl /api/dashboard/stats`
+## 📞 Support & Troubleshooting
 
 ### Common Issues
-- **Port conflicts**: Use `npm run clean-port`
-- **Database issues**: Reset with `npm run db:reset`
-- **Build errors**: Clear and rebuild with `rm -rf dist && npm run build`
+- **PX API Errors**: Check SubId format (≤20 chars, no special characters)
+- **Tracking Links**: Ensure campaign exists and is active
+- **Database Issues**: Check D1 connection and migrations
 
-This platform provides a complete 360° affiliate tracking solution with robust PX API integration, real-time analytics, and comprehensive lead management capabilities.
+### Debug Tools
+- **PX Test Page**: `/px-test` - Comprehensive API testing
+- **Browser Console**: Check for JavaScript errors
+- **PM2 Logs**: `pm2 logs --nostream` for server-side debugging
+
+---
+
+**Last Updated**: September 2025  
+**Status**: ✅ Active Development - PX Integration Phase  
+**Version**: 2.0 (Direct Post Integration)

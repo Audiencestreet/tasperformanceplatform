@@ -1,43 +1,60 @@
 // Database bindings interface
 export interface Bindings {
   DB: D1Database;
+  
+  // PX API Environment Variables
+  PX_API_TOKEN_HEALTH?: string;
+  PX_API_TOKEN_SOLAR?: string;
 }
 
-// PX API Types
-export interface PXPingRequest {
-  ApiToken: string;
-  OfferId: string;
-  DID: string;
+// PX API Direct Post Types
+export interface PXDirectPostRequest {
+  // Contact Information
+  FirstName: string;
+  LastName: string;
+  Email: string;
+  Phone: string;
+  
+  // Address Information
+  Address?: string;
+  City?: string;
+  State?: string;
+  ZipCode: string;
+  
+  // Lead Context
+  Vertical: 'Health' | 'Solar' | 'Home';
+  SessionLength?: number; // in seconds
+  TcpaText?: string;
+  
+  // Tracking Information
   SubId: string;
-  ContactData: {
-    FirstName: string;
-    LastName: string;
-    PhoneNumber: string;
-    ZipCode: string;
-    Email?: string;
-    Ownership?: string; // Own, Rent
-    Roofshade?: string; // No Shade, Little Shade, Moderate Shade, Heavy Shade
-    ElectricityBill?: string; // Monthly bill amount range
-  };
+  Source?: string;
+  ClickId?: string;
+  IpAddress?: string;
+  UserAgent?: string;
+  
+  // Solar-specific fields
+  Ownership?: 'Own' | 'Rent';
+  Roofshade?: 'No Shade' | 'Little Shade' | 'Moderate Shade' | 'Heavy Shade';
+  ElectricityBill?: string;
+  
+  // Health-specific fields
+  DateOfBirth?: string;
+  Gender?: 'Male' | 'Female';
+  Height?: string;
+  Weight?: string;
+  
+  // Additional fields as needed
+  [key: string]: any;
 }
 
-export interface PXPingResponse {
-  Status: 'BaeOK' | 'BaeNok';
+export interface PXDirectPostResponse {
+  Success: boolean;
   Message?: string;
   LeadId?: string;
   Price?: number;
   BuyerName?: string;
-}
-
-export interface PXPostRequest extends PXPingRequest {
-  // Post includes all ping data plus any additional required fields
-}
-
-export interface PXPostResponse {
-  Status: 'Success' | 'Error';
-  Message?: string;
-  LeadId?: string;
-  TransactionId?: string;
+  Errors?: string[];
 }
 
 // Internal Lead Types
@@ -306,6 +323,17 @@ export interface FacebookConversionRequest {
     order_id?: string;
   };
   action_source: 'email' | 'website' | 'phone_call' | 'chat' | 'physical_store' | 'system_generated' | 'other';
+}
+
+// Campaign Postback Parameters
+export interface CampaignPostbackParam {
+  id?: number;
+  campaign_id: number;
+  parameter_name: string;
+  parameter_value: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Postback URL Template Variables

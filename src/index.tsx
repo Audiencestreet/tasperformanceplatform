@@ -28,7 +28,141 @@ function generateUUID(): string {
 
 // API Routes
 
-// Lead submission endpoint
+// Generate tracking links
+app.post('/api/tracking/generate', async (c) => {
+  try {
+    const { campaign_id, sub_id, landing_url } = await c.req.json();
+    
+    if (!campaign_id || !sub_id || !landing_url) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'campaign_id, sub_id, and landing_url are required' 
+      }, 400);
+    }
+    
+    const db = new Database(c.env.DB);
+    const campaign = await db.getCampaign(parseInt(campaign_id));
+    
+    if (!campaign) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Campaign not found' 
+      }, 404);
+    }
+    
+    // Generate unique click ID
+    const clickId = generateUUID();
+    
+    // Generate tracking link based on campaign type
+    let trackingLink = '';
+    
+    if (campaign.name.toLowerCase().includes('adt') || campaign.offer_id === '477') {
+      // ADT Home Security specific format
+      trackingLink = `https://homesafety.adt.com/aff_ad?campaign_id=477&aff_id=15441&hostNameId=23326&aff_sub=${encodeURIComponent(sub_id)}&aff_sub2=${encodeURIComponent(clickId)}`;
+    } else {
+      // Generic tracking format
+      const baseUrl = c.req.header('host') || 'your-domain.com';
+      const protocol = c.req.header('cf-visitor') ? 'https' : 'http';
+      trackingLink = `${protocol}://${baseUrl}/track/click?c=${campaign_id}&s=${encodeURIComponent(sub_id)}&id=${clickId}&url=${encodeURIComponent(landing_url)}`;
+    }
+    
+    // Store tracking link in database
+    const trackingData = {
+      click_id: clickId,
+      campaign_id: campaign.id!,
+      sub_id: sub_id,
+      landing_url: landing_url,
+      tracking_url: trackingLink,
+      created_at: new Date().toISOString()
+    };
+    
+    // Log the tracking link generation
+    await db.logTrackingLink(trackingData);
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: {
+        tracking_link: trackingLink,
+        click_id: clickId,
+        campaign: {
+          id: campaign.id,
+          name: campaign.name,
+          offer_id: campaign.offer_id
+        },
+        sub_id: sub_id,
+        landing_url: landing_url
+      },
+      message: 'Tracking link generated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error generating tracking link:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to generate tracking link' 
+    }, 500);
+  }
+});
+
+// Click tracking endpoint
+app.get('/track/click', async (c) => {
+  try {
+    const campaignId = c.req.query('c');
+    const subId = c.req.query('s');
+    const clickId = c.req.query('id');
+    const landingUrl = c.req.query('url');
+    
+    if (!campaignId || !subId || !clickId || !landingUrl) {
+      return c.redirect('https://example.com'); // Fallback redirect
+    }
+    
+    const db = new Database(c.env.DB);
+    
+    // Extract tracking data
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+    const userAgent = c.req.header('User-Agent') || '';
+    const referrer = c.req.header('Referer') || '';
+    
+    // Log the click
+    const clickData = {
+      click_id: clickId,
+      campaign_id: parseInt(campaignId),
+      sub_id: subId,
+      landing_url: decodeURIComponent(landingUrl),
+      ip_address: clientIP,
+      user_agent: userAgent,
+      referrer: referrer,
+      clicked_at: new Date().toISOString()
+    };
+    
+    await db.logClick(clickData);
+    
+    // Get campaign for postback triggering
+    const campaign = await db.getCampaign(parseInt(campaignId));
+    if (campaign) {
+      const postbackService = new PostbackService(c.env.DB);
+      await postbackService.triggerPostbacks(0, 'click_tracked', {
+        click_id: clickId,
+        campaign_id: campaignId,
+        sub_id: subId
+      });
+    }
+    
+    // Redirect to landing page
+    return c.redirect(decodeURIComponent(landingUrl));
+    
+  } catch (error) {
+    console.error('Error tracking click:', error);
+    // Fallback redirect on error
+    const landingUrl = c.req.query('url');
+    if (landingUrl) {
+      return c.redirect(decodeURIComponent(landingUrl));
+    }
+    return c.redirect('https://example.com');
+  }
+});
+
+// Lead submission endpoint (kept for existing integrations)
 app.post('/api/leads', async (c) => {
   try {
     const formData: LeadFormData = await c.req.json();
@@ -97,104 +231,94 @@ app.post('/api/leads', async (c) => {
     const createdLead = await db.createLead(lead);
     await db.logLeadEvent(createdLead.id!, 'lead_created', { lead_uuid: leadUUID });
     
-    // Process with PX API
+    // Process with PX Direct Post API
     const startTime = Date.now();
     
     try {
-      const pxResult = await PXAPIClient.processLead(
-        affiliate.api_key, // Using affiliate's API key - would need PX token in production
-        campaign.offer_id,
-        campaign.sub_id,
-        {
-          FirstName: formData.first_name,
-          LastName: formData.last_name,
-          PhoneNumber: formData.phone_number,
-          ZipCode: formData.zip_code,
-          Email: formData.email,
-          Ownership: formData.ownership,
-          Roofshade: formData.roof_shade,
-          ElectricityBill: formData.electricity_bill
-        }
-      );
+      // Determine vertical based on campaign or form data
+      const vertical = campaign.name.toLowerCase().includes('solar') ? 'Solar' : 
+                     campaign.name.toLowerCase().includes('health') ? 'Health' : 'Solar'; // Default to Solar
+      
+      const pxResult = await PXAPIClient.postDirectLead({
+        vertical: vertical,
+        subId: campaign.sub_id,
+        source: formData.utm_source || 'direct',
+        contact: {
+          firstName: formData.first_name,
+          lastName: formData.last_name,
+          email: formData.email || '',
+          phone: formData.phone_number,
+          zipCode: formData.zip_code
+        },
+        context: {
+          sessionLength: Math.floor(Math.random() * 300) + 60, // Random 1-5 minutes
+          tcpaText: 'By submitting this form, I consent to receive calls and texts.',
+          clickId: leadUUID,
+          ipAddress: clientIP,
+          userAgent: userAgent
+        },
+        extras: vertical === 'Solar' ? {
+          ...(formData.ownership && { Ownership: formData.ownership }),
+          ...(formData.roof_shade && { Roofshade: formData.roof_shade }),
+          ...(formData.electricity_bill && { ElectricityBill: formData.electricity_bill })
+        } : {},
+        env: c.env
+      });
       
       const responseTime = Date.now() - startTime;
       
       // Update lead with PX results
       const updates: any = {
-        ping_sent_at: new Date().toISOString()
+        ping_sent_at: new Date().toISOString(),
+        post_sent_at: new Date().toISOString()
       };
       
-      if (pxResult.pingResponse) {
-        updates.ping_status = pxResult.pingResponse.Status === 'BaeOK' ? 'accepted' : 'rejected';
-        updates.ping_response = JSON.stringify(pxResult.pingResponse);
+      if (pxResult.response) {
+        updates.ping_status = pxResult.response.Success ? 'accepted' : 'rejected';
+        updates.post_status = pxResult.response.Success ? 'posted' : 'failed';
+        updates.ping_response = JSON.stringify(pxResult.response);
+        updates.post_response = JSON.stringify(pxResult.response);
         
-        if (pxResult.pingResponse.LeadId) {
-          updates.px_lead_id = pxResult.pingResponse.LeadId;
+        if (pxResult.response.LeadId) {
+          updates.px_lead_id = pxResult.response.LeadId;
         }
         
-        await db.logLeadEvent(createdLead.id!, 'ping_sent', pxResult.pingResponse);
+        await db.logLeadEvent(createdLead.id!, 'direct_post_sent', pxResult.response);
       }
       
-      if (pxResult.postResponse) {
-        updates.post_status = pxResult.postResponse.Status === 'Success' ? 'posted' : 'failed';
-        updates.post_response = JSON.stringify(pxResult.postResponse);
-        updates.post_sent_at = new Date().toISOString();
-        
-        await db.logLeadEvent(createdLead.id!, 'post_sent', pxResult.postResponse);
+      if (pxResult.error) {
+        updates.ping_status = 'failed';
+        updates.post_status = 'failed';
+        await db.logLeadEvent(createdLead.id!, 'direct_post_error', pxResult.error);
       }
       
       await db.updateLeadStatus(createdLead.id!, updates);
       
-      // Log API calls
-      if (pxResult.pingResponse) {
-        await db.logApiCall(
-          createdLead.id!,
-          'ping',
-          'https://leadapi.px.com/api/call/ping',
-          { lead_uuid: leadUUID },
-          pxResult.pingResponse,
-          200,
-          responseTime / 2
-        );
-      }
-      
-      if (pxResult.postResponse) {
-        await db.logApiCall(
-          createdLead.id!,
-          'post',
-          'https://leadapi.px.com/api/call/post',
-          { lead_uuid: leadUUID },
-          pxResult.postResponse,
-          200,
-          responseTime / 2
-        );
-      }
-      
-      // Log any errors
-      for (const error of pxResult.errors) {
-        await db.logApiCall(
-          createdLead.id!,
-          'error',
-          'px-api',
-          { lead_uuid: leadUUID },
-          error,
-          500,
-          0,
-          error.message
-        );
-      }
+      // Log API call
+      await db.logApiCall(
+        createdLead.id!,
+        'direct_post',
+        'https://leadapi.px.com/api/lead/directpost',
+        { 
+          lead_uuid: leadUUID,
+          vertical: vertical,
+          sub_id: campaign.sub_id
+        },
+        pxResult.response || pxResult.error,
+        pxResult.response ? 200 : 500,
+        responseTime,
+        pxResult.error?.message
+      );
       
       // Trigger postbacks based on PX result
       const postbackService = new PostbackService(c.env.DB);
       
-      if (pxResult.pingResponse?.Status === 'BaeOK') {
+      if (pxResult.response?.Success) {
         await postbackService.triggerPostbacks(createdLead.id!, 'ping_accepted', {
           click_id: formData.utm_source,
-          payout: pxResult.pingResponse.Price?.toString()
+          payout: pxResult.response.Price?.toString()
         });
-      }
-      
-      if (pxResult.postResponse?.Status === 'Success') {
+        
         await postbackService.triggerPostbacks(createdLead.id!, 'post_successful', {
           click_id: formData.utm_source,
           payout: campaign.payout_amount.toString()
@@ -205,7 +329,7 @@ app.post('/api/leads', async (c) => {
         await conversionService.processConversion(
           createdLead.id!,
           'lead_qualified',
-          campaign.payout_amount
+          pxResult.response.Price || campaign.payout_amount
         );
       }
       
@@ -214,15 +338,19 @@ app.post('/api/leads', async (c) => {
         data: {
           lead_id: createdLead.id,
           lead_uuid: leadUUID,
-          ping_status: updates.ping_status || 'pending',
-          post_status: updates.post_status || 'pending',
+          vertical: vertical,
+          sub_id: campaign.sub_id,
+          status: pxResult.response?.Success ? 'accepted' : 'rejected',
           px_result: {
-            ping_accepted: pxResult.pingResponse?.Status === 'BaeOK',
-            post_successful: pxResult.postResponse?.Status === 'Success',
-            errors: pxResult.errors
+            success: !!pxResult.response?.Success,
+            lead_id: pxResult.response?.LeadId,
+            price: pxResult.response?.Price,
+            buyer_name: pxResult.response?.BuyerName,
+            message: pxResult.response?.Message,
+            errors: pxResult.response?.Errors || (pxResult.error ? [pxResult.error.message] : [])
           }
         },
-        message: 'Lead submitted successfully'
+        message: 'Lead submitted successfully using Direct Post API'
       });
       
     } catch (pxError) {
@@ -246,6 +374,287 @@ app.post('/api/leads', async (c) => {
     return c.json<ApiResponse>({ 
       success: false, 
       error: 'Internal server error' 
+    }, 500);
+  }
+});
+
+// PX Direct Post Test Endpoint
+app.post('/api/px/direct-post', async (c) => {
+  try {
+    const {
+      vertical,
+      subId,
+      source,
+      contact,
+      context = {},
+      extras = {}
+    } = await c.req.json();
+    
+    // Validate required fields
+    if (!vertical || !subId || !contact) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'vertical, subId, and contact are required' 
+      }, 400);
+    }
+    
+    if (!contact.firstName || !contact.lastName || !contact.email || !contact.phone || !contact.zipCode) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'firstName, lastName, email, phone, and zipCode are required in contact' 
+      }, 400);
+    }
+    
+    // Extract client info for context
+    const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+    const userAgent = c.req.header('User-Agent') || '';
+    
+    // Merge context with client info
+    const fullContext = {
+      sessionLength: 180, // 3 minutes default
+      tcpaText: 'By submitting this form, I consent to receive calls and texts.',
+      ipAddress: clientIP,
+      userAgent: userAgent,
+      ...context
+    };
+    
+    const startTime = Date.now();
+    const pxResult = await PXAPIClient.postDirectLead({
+      vertical,
+      subId,
+      source,
+      contact,
+      context: fullContext,
+      extras,
+      env: c.env
+    });
+    const responseTime = Date.now() - startTime;
+    
+    return c.json<ApiResponse>({
+      success: !pxResult.error,
+      data: {
+        vertical,
+        subId,
+        source,
+        response_time_ms: responseTime,
+        px_response: pxResult.response,
+        px_error: pxResult.error,
+        success: !!pxResult.response?.Success,
+        lead_id: pxResult.response?.LeadId,
+        price: pxResult.response?.Price,
+        buyer_name: pxResult.response?.BuyerName,
+        message: pxResult.response?.Message,
+        errors: pxResult.response?.Errors
+      },
+      message: pxResult.error ? 'Direct Post failed' : 'Direct Post sent successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error testing PX Direct Post:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Internal server error' 
+    }, 500);
+  }
+});
+
+// PX SubId Helper Endpoints
+app.get('/api/px/subids', async (c) => {
+  try {
+    const trafficType = c.req.query('traffic_type');
+    
+    if (trafficType) {
+      const subIds = PXAPIClient.getAvailableSubIds(trafficType);
+      return c.json<ApiResponse>({
+        success: true,
+        data: { traffic_type: trafficType, available_subids: subIds }
+      });
+    }
+    
+    const allMappings = PXAPIClient.getAllSubIdMappings();
+    return c.json<ApiResponse>({
+      success: true,
+      data: { subid_mappings: allMappings }
+    });
+    
+  } catch (error) {
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Internal server error' 
+    }, 500);
+  }
+});
+
+app.post('/api/px/subid/generate', async (c) => {
+  try {
+    const { trafficType, campaignNumber } = await c.req.json();
+    
+    if (!trafficType) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'trafficType is required' 
+      }, 400);
+    }
+    
+    const subId = PXAPIClient.generateSubId(trafficType, campaignNumber);
+    const validation = PXAPIClient.validateSubId(subId);
+    
+    return c.json<ApiResponse>({
+      success: validation.valid,
+      data: {
+        traffic_type: trafficType,
+        campaign_number: campaignNumber,
+        generated_subid: subId,
+        valid: validation.valid,
+        error: validation.error
+      },
+      message: validation.valid ? 'SubId generated successfully' : validation.error
+    });
+    
+  } catch (error) {
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Internal server error' 
+    }, 500);
+  }
+});
+
+// Affiliate Management API Routes
+
+// Create new affiliate
+app.post('/api/affiliates', async (c) => {
+  try {
+    const affiliateData = await c.req.json();
+    const db = new Database(c.env.DB);
+    
+    // Validate required fields
+    if (!affiliateData.name || !affiliateData.email) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Name and email are required' 
+      }, 400);
+    }
+    
+    // Generate API key if not provided
+    if (!affiliateData.api_key) {
+      affiliateData.api_key = generateUUID().replace(/-/g, '');
+    }
+    
+    // Set default status if not provided
+    if (!affiliateData.status) {
+      affiliateData.status = 'active';
+    }
+    
+    const affiliate = await db.createAffiliate(affiliateData);
+    
+    return c.json<ApiResponse<Affiliate>>({
+      success: true,
+      data: affiliate,
+      message: 'Affiliate created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating affiliate:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to create affiliate' 
+    }, 500);
+  }
+});
+
+// Get all affiliates
+app.get('/api/affiliates', async (c) => {
+  try {
+    const db = new Database(c.env.DB);
+    const affiliates = await db.getAllAffiliates();
+    
+    return c.json<ApiResponse<Affiliate[]>>({ success: true, data: affiliates });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// Get affiliate details
+app.get('/api/affiliates/:id', async (c) => {
+  try {
+    const affiliateId = parseInt(c.req.param('id'));
+    const db = new Database(c.env.DB);
+    
+    const affiliate = await db.getAffiliate(affiliateId);
+    if (!affiliate) {
+      return c.json<ApiResponse>({ success: false, error: 'Affiliate not found' }, 404);
+    }
+    
+    return c.json<ApiResponse<Affiliate>>({ success: true, data: affiliate });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// Update affiliate
+app.put('/api/affiliates/:id', async (c) => {
+  try {
+    const affiliateId = parseInt(c.req.param('id'));
+    const updateData = await c.req.json();
+    const db = new Database(c.env.DB);
+    
+    const affiliate = await db.updateAffiliate(affiliateId, updateData);
+    if (!affiliate) {
+      return c.json<ApiResponse>({ success: false, error: 'Affiliate not found' }, 404);
+    }
+    
+    return c.json<ApiResponse<Affiliate>>({
+      success: true,
+      data: affiliate,
+      message: 'Affiliate updated successfully'
+    });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to update affiliate' }, 500);
+  }
+});
+
+// Create new campaign
+app.post('/api/campaigns', async (c) => {
+  try {
+    const campaignData = await c.req.json();
+    const db = new Database(c.env.DB);
+    
+    // Validate required fields
+    const requiredFields = ['affiliate_id', 'name', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount'];
+    for (const field of requiredFields) {
+      if (!campaignData[field]) {
+        return c.json<ApiResponse>({ 
+          success: false, 
+          error: `Missing required field: ${field}` 
+        }, 400);
+      }
+    }
+    
+    // Verify affiliate exists
+    const affiliate = await db.getAffiliate(campaignData.affiliate_id);
+    if (!affiliate) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Affiliate not found' 
+      }, 404);
+    }
+    
+    // Set default status if not provided
+    if (!campaignData.status) {
+      campaignData.status = 'active';
+    }
+    
+    const campaign = await db.createCampaign(campaignData);
+    
+    return c.json<ApiResponse<Campaign>>({
+      success: true,
+      data: campaign,
+      message: 'Campaign created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating campaign:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to create campaign' 
     }, 500);
   }
 });
@@ -424,6 +833,107 @@ app.get('/api/postbacks/logs', async (c) => {
     return c.json<ApiResponse>({ success: true, data: logs });
   } catch (error) {
     return c.json<ApiResponse>({ success: false, error: 'Failed to get postback logs' }, 500);
+  }
+});
+
+// Campaign Postback Parameters API Routes
+
+// Create campaign postback parameter
+app.post('/api/campaigns/:campaignId/postback-params', async (c) => {
+  try {
+    const campaignId = parseInt(c.req.param('campaignId'));
+    const { parameter_name, parameter_value, description } = await c.req.json();
+    
+    if (!parameter_name || !parameter_value) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'parameter_name and parameter_value are required' 
+      }, 400);
+    }
+    
+    const db = new Database(c.env.DB);
+    
+    // Verify campaign exists
+    const campaign = await db.getCampaign(campaignId);
+    if (!campaign) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Campaign not found' 
+      }, 404);
+    }
+    
+    const param = await db.createCampaignPostbackParam({
+      campaign_id: campaignId,
+      parameter_name,
+      parameter_value,
+      description: description || null
+    });
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: param,
+      message: 'Campaign postback parameter created successfully'
+    });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to create postback parameter' }, 500);
+  }
+});
+
+// Get campaign postback parameters
+app.get('/api/campaigns/:campaignId/postback-params', async (c) => {
+  try {
+    const campaignId = parseInt(c.req.param('campaignId'));
+    const db = new Database(c.env.DB);
+    
+    const params = await db.getCampaignPostbackParams(campaignId);
+    
+    return c.json<ApiResponse>({ success: true, data: params });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to get postback parameters' }, 500);
+  }
+});
+
+// Update campaign postback parameter
+app.put('/api/campaigns/:campaignId/postback-params/:paramId', async (c) => {
+  try {
+    const campaignId = parseInt(c.req.param('campaignId'));
+    const paramId = parseInt(c.req.param('paramId'));
+    const updates = await c.req.json();
+    
+    const db = new Database(c.env.DB);
+    
+    const param = await db.updateCampaignPostbackParam(paramId, updates);
+    if (!param) {
+      return c.json<ApiResponse>({ success: false, error: 'Postback parameter not found' }, 404);
+    }
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: param,
+      message: 'Postback parameter updated successfully'
+    });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to update postback parameter' }, 500);
+  }
+});
+
+// Delete campaign postback parameter
+app.delete('/api/campaigns/:campaignId/postback-params/:paramId', async (c) => {
+  try {
+    const paramId = parseInt(c.req.param('paramId'));
+    const db = new Database(c.env.DB);
+    
+    const deleted = await db.deleteCampaignPostbackParam(paramId);
+    if (!deleted) {
+      return c.json<ApiResponse>({ success: false, error: 'Postback parameter not found' }, 404);
+    }
+    
+    return c.json<ApiResponse>({
+      success: true,
+      message: 'Postback parameter deleted successfully'
+    });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to delete postback parameter' }, 500);
   }
 });
 
@@ -610,7 +1120,7 @@ app.get('/', (c) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Affiliate Tracking Platform</title>
+        <title>Affiliate Click Tracking Platform</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <link href="/static/style.css" rel="stylesheet">
@@ -621,11 +1131,27 @@ app.get('/', (c) => {
                 <div class="flex justify-between items-center py-6">
                     <div class="flex items-center">
                         <i class="fas fa-chart-line text-blue-600 text-2xl mr-3"></i>
-                        <h1 class="text-2xl font-bold text-gray-900">Affiliate Tracking Platform</h1>
+                        <h1 class="text-2xl font-bold text-gray-900">Affiliate Click Tracking Platform</h1>
                     </div>
                     <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-500">360° Lead Tracking</span>
-                        <div class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                        <nav class="flex space-x-4">
+                            <a href="/affiliates" class="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100">
+                                <i class="fas fa-users mr-1"></i>Affiliates
+                            </a>
+                            <a href="/campaigns" class="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100">
+                                <i class="fas fa-bullhorn mr-1"></i>Campaigns
+                            </a>
+                            <a href="/px-test" class="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100">
+                                <i class="fas fa-vial mr-1"></i>PX Test
+                            </a>
+                            <a href="/postbacks" class="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md hover:bg-gray-100">
+                                <i class="fas fa-webhook mr-1"></i>Postbacks
+                            </a>
+                        </nav>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-500">360° Click Tracking</span>
+                            <div class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -685,73 +1211,13 @@ app.get('/', (c) => {
             
             <!-- Main Content -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <!-- Lead Capture Form -->
+                <!-- Tracking Links Generator -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h2 class="text-lg font-semibold text-gray-900 mb-6">
-                        <i class="fas fa-plus-circle mr-2"></i>Capture New Lead
+                        <i class="fas fa-link mr-2"></i>Generate Tracking Links
                     </h2>
                     
-                    <form id="lead-form" class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-                                <input type="text" name="first_name" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-                                <input type="text" name="last_name" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                        </div>
-                        
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                <input type="email" name="email" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                                <input type="tel" name="phone_number" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Zip Code</label>
-                            <input type="text" name="zip_code" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
-                        
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Home Ownership</label>
-                                <select name="ownership" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="">Select...</option>
-                                    <option value="Own">Own</option>
-                                    <option value="Rent">Rent</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Roof Shade</label>
-                                <select name="roof_shade" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="">Select...</option>
-                                    <option value="No Shade">No Shade</option>
-                                    <option value="Little Shade">Little Shade</option>
-                                    <option value="Moderate Shade">Moderate Shade</option>
-                                    <option value="Heavy Shade">Heavy Shade</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Electric Bill</label>
-                                <select name="electricity_bill" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="">Select...</option>
-                                    <option value="Under $100">Under $100</option>
-                                    <option value="$100-150">$100-150</option>
-                                    <option value="$150-200">$150-200</option>
-                                    <option value="$200-250">$200-250</option>
-                                    <option value="$250-300">$250-300</option>
-                                    <option value="$300+">$300+</option>
-                                </select>
-                            </div>
-                        </div>
-                        
+                    <form id="tracking-form" class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Campaign</label>
                             <select name="campaign_id" id="campaign-select" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -759,12 +1225,23 @@ app.get('/', (c) => {
                             </select>
                         </div>
                         
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Your SubID</label>
+                            <input type="text" name="sub_id" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. EM1, FB2, GG1">
+                            <p class="text-xs text-gray-500 mt-1">Use format: EM1, FB2, GG1 (traffic type + number)</p>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Landing Page URL</label>
+                            <input type="url" name="landing_url" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://your-landing-page.com">
+                        </div>
+                        
                         <button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold">
-                            <i class="fas fa-paper-plane mr-2"></i>Submit Lead
+                            <i class="fas fa-link mr-2"></i>Generate Tracking Link
                         </button>
                     </form>
                     
-                    <div id="form-result" class="mt-4 hidden"></div>
+                    <div id="tracking-result" class="mt-4 hidden"></div>
                 </div>
                 
                 <!-- Recent Activity -->
@@ -814,6 +1291,9 @@ app.get('/campaigns', (c) => {
                         <h1 class="text-2xl font-bold text-gray-900">Campaign Management</h1>
                     </div>
                     <div class="flex space-x-2">
+                        <a href="/px-test" class="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700">
+                            <i class="fas fa-vial mr-2"></i>PX Test
+                        </a>
                         <a href="/postbacks" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
                             <i class="fas fa-webhook mr-2"></i>Postbacks
                         </a>
@@ -907,6 +1387,113 @@ app.get('/postbacks', (c) => {
         
         <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
         <script src="/static/postbacks.js"></script>
+    </body>
+    </html>
+  `)
+})
+
+// Affiliates management page
+app.get('/affiliates', (c) => {
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Affiliate Management - Affiliate Tracking</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-gray-100 min-h-screen">
+        <div class="bg-white shadow-sm border-b">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-6">
+                    <div class="flex items-center">
+                        <a href="/" class="text-gray-500 hover:text-gray-700 mr-4">
+                            <i class="fas fa-arrow-left"></i>
+                        </a>
+                        <i class="fas fa-users text-blue-600 text-2xl mr-3"></i>
+                        <h1 class="text-2xl font-bold text-gray-900">Affiliate Management</h1>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="create-affiliate-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                            <i class="fas fa-plus mr-2"></i>New Affiliate
+                        </button>
+                        <a href="/campaigns" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
+                            <i class="fas fa-bullhorn mr-2"></i>Campaigns
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Affiliates List -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">All Affiliates</h2>
+                </div>
+                
+                <div id="affiliates-list" class="p-6">
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                        <p>Loading affiliates...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Create/Edit Affiliate Modal -->
+        <div id="affiliate-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg max-w-md w-full p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="modal-title" class="text-lg font-semibold text-gray-900">New Affiliate</h3>
+                    <button id="close-modal" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="affiliate-form" class="space-y-4">
+                    <input type="hidden" id="affiliate-id" name="id">
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                        <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                        <input type="email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                        <input type="text" name="api_key" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Auto-generated if left empty">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="active">Active</option>
+                            <option value="suspended">Suspended</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex justify-end space-x-2 pt-4">
+                        <button type="button" id="cancel-affiliate" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                            Save Affiliate
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+        <script src="/static/affiliates.js"></script>
     </body>
     </html>
   `)
@@ -1029,6 +1616,230 @@ app.get('/conversions', (c) => {
         
         <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
         <script src="/static/conversions.js"></script>
+    </body>
+    </html>
+  `)
+})
+
+// PX Direct Post Test Page
+app.get('/px-test', (c) => {
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>PX Direct Post Test - Affiliate Tracking</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-gray-100 min-h-screen">
+        <div class="bg-white shadow-sm border-b">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-6">
+                    <div class="flex items-center">
+                        <a href="/" class="text-gray-500 hover:text-gray-700 mr-4">
+                            <i class="fas fa-arrow-left"></i>
+                        </a>
+                        <i class="fas fa-vial text-orange-600 text-2xl mr-3"></i>
+                        <h1 class="text-2xl font-bold text-gray-900">PX Direct Post Test</h1>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        API Endpoint: https://leadapi.px.com/api/lead/directpost
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- SubId Helper -->
+            <div class="bg-white rounded-lg shadow mb-8">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">SubId Generator</h2>
+                    <p class="text-sm text-gray-600">Generate valid SubIds based on traffic type (≤20 total per account)</p>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Traffic Type</label>
+                            <select id="traffic-type" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">Select Traffic Type</option>
+                                <option value="Email">Email (EM01, EM02)</option>
+                                <option value="Facebook">Facebook (FB01)</option>
+                                <option value="Instagram">Instagram (IG01)</option>
+                                <option value="TikTok">TikTok (TT01)</option>
+                                <option value="Twitter">Twitter (TW01)</option>
+                                <option value="Taboola">Taboola (TB01)</option>
+                                <option value="Outbrain">Outbrain (OB01)</option>
+                                <option value="Google">Google/Search (GG01)</option>
+                                <option value="Social">Social Media (Multiple)</option>
+                                <option value="Native">Native Ads (Multiple)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Campaign Number (Optional)</label>
+                            <input type="number" id="campaign-number" min="1" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="1">
+                        </div>
+                        <div class="md:col-span-2">
+                            <button onclick="generateSubId()" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">
+                                <i class="fas fa-magic mr-2"></i>Generate SubId
+                            </button>
+                            <div id="subid-result" class="mt-4 p-4 bg-gray-50 border rounded-md hidden">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-mono text-lg" id="generated-subid"></span>
+                                    <button onclick="copySubId()" class="text-blue-600 hover:text-blue-800">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Direct Post Test Form -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">Direct Post Test Form</h2>
+                    <p class="text-sm text-gray-600">Test PX Direct Post API with Health and Solar verticals</p>
+                </div>
+                <div class="p-6">
+                    <form id="px-test-form" class="space-y-6">
+                        <!-- Vertical Selection -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Vertical *</label>
+                                <select id="vertical" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Select Vertical</option>
+                                    <option value="Health">Health</option>
+                                    <option value="Solar">Solar</option>
+                                    <option value="Home">Home</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">SubId *</label>
+                                <input type="text" id="subId" required maxlength="20" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., FB01, EM01, GG01">
+                                <p class="text-xs text-gray-500 mt-1">Max 20 characters, no special chars</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Source</label>
+                                <input type="text" id="source" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., facebook, google">
+                            </div>
+                        </div>
+                        
+                        <!-- Contact Information -->
+                        <div class="border-t pt-6">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Contact Information</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
+                                    <input type="text" id="firstName" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
+                                    <input type="text" id="lastName" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                                    <input type="email" id="email" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                                    <input type="tel" id="phone" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="(555) 123-4567">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Zip Code *</label>
+                                    <input type="text" id="zipCode" required pattern="[0-9]{5}" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="12345">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">State</label>
+                                    <input type="text" id="state" maxlength="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="CA">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Solar-Specific Fields -->
+                        <div id="solar-fields" class="border-t pt-6 hidden">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Solar Information</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Property Ownership</label>
+                                    <select id="ownership" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select</option>
+                                        <option value="Own">Own</option>
+                                        <option value="Rent">Rent</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Roof Shade</label>
+                                    <select id="roofshade" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select</option>
+                                        <option value="No Shade">No Shade</option>
+                                        <option value="Little Shade">Little Shade</option>
+                                        <option value="Moderate Shade">Moderate Shade</option>
+                                        <option value="Heavy Shade">Heavy Shade</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Electricity Bill</label>
+                                    <input type="text" id="electricityBill" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="$100-200">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Health-Specific Fields -->
+                        <div id="health-fields" class="border-t pt-6 hidden">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Health Information</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Date of Birth</label>
+                                    <input type="date" id="dateOfBirth" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Gender</label>
+                                    <select id="gender" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Height</label>
+                                    <input type="text" id="height" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="5'10&quot;">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Weight</label>
+                                    <input type="text" id="weight" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="180 lbs">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="border-t pt-6">
+                            <button type="submit" class="bg-green-600 text-white px-8 py-3 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                <i class="fas fa-paper-plane mr-2"></i>
+                                <span id="submit-text">Send Direct Post</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Results -->
+            <div id="results" class="mt-8 bg-white rounded-lg shadow hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">PX API Response</h2>
+                </div>
+                <div class="p-6">
+                    <div id="response-content" class="bg-gray-50 p-4 rounded-md">
+                        <!-- Response will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+        <script src="/static/px-test.js"></script>
     </body>
     </html>
   `)

@@ -144,8 +144,8 @@ class AffiliateTracker {
     }
     
     setupForm() {
-        const form = document.getElementById('lead-form');
-        const resultDiv = document.getElementById('form-result');
+        const form = document.getElementById('tracking-form');
+        const resultDiv = document.getElementById('tracking-result');
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -156,13 +156,13 @@ class AffiliateTracker {
             // Show loading state
             const submitButton = form.querySelector('button[type="submit"]');
             const originalText = submitButton.innerHTML;
-            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
             submitButton.disabled = true;
             
             resultDiv.classList.add('hidden');
             
             try {
-                const response = await axios.post('/api/leads', data);
+                const response = await axios.post('/api/tracking/generate', data);
                 
                 if (response.data.success) {
                     const result = response.data.data;
@@ -170,32 +170,56 @@ class AffiliateTracker {
                     resultDiv.innerHTML = `
                         <div class="bg-green-50 border border-green-200 rounded-lg p-4">
                             <div class="flex items-center">
-                                <i class="fas fa-check-circle text-green-500 mr-2"></i>
-                                <h3 class="font-semibold text-green-800">Lead Submitted Successfully!</h3>
+                                <i class="fas fa-link text-green-500 mr-2"></i>
+                                <h3 class="font-semibold text-green-800">Tracking Link Generated!</h3>
                             </div>
-                            <div class="mt-2 text-sm text-green-700">
-                                <p><strong>Lead ID:</strong> ${result.lead_id}</p>
-                                <p><strong>UUID:</strong> ${result.lead_uuid}</p>
-                                <p><strong>Ping Status:</strong> ${result.ping_status}</p>
-                                <p><strong>Post Status:</strong> ${result.post_status}</p>
-                                ${result.px_result.ping_accepted ? 
-                                    '<p class="text-green-600"><i class="fas fa-check mr-1"></i>PX Ping Accepted</p>' : 
-                                    '<p class="text-red-600"><i class="fas fa-times mr-1"></i>PX Ping Rejected</p>'
-                                }
-                                ${result.px_result.post_successful ? 
-                                    '<p class="text-green-600"><i class="fas fa-check mr-1"></i>Post Successful</p>' : 
-                                    '<p class="text-yellow-600"><i class="fas fa-clock mr-1"></i>Post Pending/Failed</p>'
-                                }
+                            <div class="mt-3 space-y-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-700 mb-1">Your Tracking Link:</label>
+                                    <div class="flex">
+                                        <input type="text" id="generated-link" value="${result.tracking_link}" 
+                                               class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-l-md bg-white" readonly>
+                                        <button type="button" onclick="this.copyTrackingLink()" 
+                                                class="px-4 py-2 bg-blue-600 text-white text-sm rounded-r-md hover:bg-blue-700">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4 text-xs">
+                                    <div>
+                                        <span class="font-medium text-gray-700">Campaign:</span>
+                                        <span class="text-gray-600">${result.campaign.name}</span>
+                                    </div>
+                                    <div>
+                                        <span class="font-medium text-gray-700">Click ID:</span>
+                                        <span class="text-gray-600">${result.click_id}</span>
+                                    </div>
+                                </div>
+                                <div class="bg-blue-50 border border-blue-200 rounded p-3">
+                                    <p class="text-xs text-blue-800">
+                                        <i class="fas fa-info-circle mr-1"></i>
+                                        Use this link in your traffic sources. All clicks will be tracked and attributed to your SubID: <strong>${result.sub_id}</strong>
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     `;
                     
-                    // Reset form
-                    form.reset();
+                    // Add copy functionality
+                    window.copyTrackingLink = () => {
+                        const linkInput = document.getElementById('generated-link');
+                        linkInput.select();
+                        document.execCommand('copy');
+                        
+                        const button = document.querySelector('button[onclick="this.copyTrackingLink()"]');
+                        const originalText = button.innerHTML;
+                        button.innerHTML = '<i class="fas fa-check"></i>';
+                        setTimeout(() => {
+                            button.innerHTML = originalText;
+                        }, 2000);
+                    };
                     
-                    // Refresh stats and activity
-                    this.loadDashboardStats();
-                    this.loadRecentActivity();
+                    // Don't reset form to allow generating multiple links with different SubIDs
                     
                 } else {
                     resultDiv.innerHTML = `
@@ -210,14 +234,14 @@ class AffiliateTracker {
                 }
                 
             } catch (error) {
-                console.error('Error submitting lead:', error);
+                console.error('Error generating tracking link:', error);
                 resultDiv.innerHTML = `
                     <div class="bg-red-50 border border-red-200 rounded-lg p-4">
                         <div class="flex items-center">
                             <i class="fas fa-exclamation-triangle text-red-500 mr-2"></i>
                             <h3 class="font-semibold text-red-800">Network Error</h3>
                         </div>
-                        <p class="mt-1 text-sm text-red-700">Failed to submit lead. Please try again.</p>
+                        <p class="mt-1 text-sm text-red-700">Failed to generate tracking link. Please try again.</p>
                     </div>
                 `;
             } finally {
