@@ -66,6 +66,8 @@ export class PXAPIClient {
   // API Tokens from environment variables (fallback to production tokens for development)
   private static readonly API_TOKEN_HEALTH = 'F9F9B3CC-85D8-4142-9007-61F784C1F098';
   private static readonly API_TOKEN_SOLAR = 'B593425D-90C7-4CB8-8952-605D8A0CCEC0';
+  // TODO: Add Home vertical token when provided
+  private static readonly API_TOKEN_HOME = '';
   
   /**
    * Post lead directly to PX API using Direct Post endpoint
@@ -444,8 +446,14 @@ export class PXAPIClient {
         return env?.PX_API_TOKEN_HEALTH || this.API_TOKEN_HEALTH;
       case 'solar':
         return env?.PX_API_TOKEN_SOLAR || this.API_TOKEN_SOLAR;
+      case 'home':
+        const homeToken = env?.PX_API_TOKEN_HOME || this.API_TOKEN_HOME;
+        if (!homeToken) {
+          throw new Error(`No API token configured for Home vertical. Please provide PX_API_TOKEN_HOME or contact your PX account manager.`);
+        }
+        return homeToken;
       default:
-        throw new Error(`No default token configured for vertical: ${vertical}`);
+        throw new Error(`No default token configured for vertical: ${vertical}. Supported verticals: Health, Solar, Home`);
     }
   }
   
@@ -554,6 +562,60 @@ export class PXAPIClient {
         ...(solarData.roofshade && { Roofshade: solarData.roofshade }),
         ...(solarData.electricityBill && { ElectricityBill: solarData.electricityBill }),
         ...solarData
+      },
+      env
+    });
+  }
+  
+  /**
+   * Convenience method for Home vertical
+   */
+  static async postHomeLead({
+    subId,
+    source,
+    contact,
+    context = {},
+    homeData = {},
+    env
+  }: {
+    subId: string;
+    source?: string;
+    contact: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      zipCode: string;
+      address?: string;
+      city?: string;
+      state?: string;
+    };
+    context?: {
+      sessionLength?: number;
+      tcpaText?: string;
+      clickId?: string;
+      ipAddress?: string;
+      userAgent?: string;
+    };
+    homeData?: {
+      ownership?: 'Own' | 'Rent';
+      propertyType?: string;
+      homeAge?: string;
+      [key: string]: any;
+    };
+    env?: any;
+  }) {
+    return this.postDirectLead({
+      vertical: 'Home',
+      subId,
+      source,
+      contact,
+      context,
+      extras: {
+        ...(homeData.ownership && { Ownership: homeData.ownership }),
+        ...(homeData.propertyType && { PropertyType: homeData.propertyType }),
+        ...(homeData.homeAge && { HomeAge: homeData.homeAge }),
+        ...homeData
       },
       env
     });

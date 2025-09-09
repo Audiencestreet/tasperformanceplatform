@@ -2015,7 +2015,7 @@ app.get('/px-test', (c) => {
                                     <option value="">Select Vertical</option>
                                     <option value="Health">Health</option>
                                     <option value="Solar">Solar</option>
-                                    <option value="Home">Home</option>
+                                    <!-- <option value="Home">Home</option> <!-- Disabled: Missing PX API token for Home vertical -->
                                 </select>
                             </div>
                             <div>
