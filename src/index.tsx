@@ -705,6 +705,67 @@ app.get('/api/campaigns', async (c) => {
   }
 });
 
+// Update campaign
+app.put('/api/campaigns/:id', async (c) => {
+  try {
+    const campaignId = parseInt(c.req.param('id'));
+    const campaignData = await c.req.json();
+    const db = new Database(c.env.DB);
+    
+    // Check if campaign exists
+    const existingCampaign = await db.getCampaign(campaignId);
+    if (!existingCampaign) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Campaign not found' 
+      }, 404);
+    }
+    
+    // Validate required fields
+    const requiredFields = ['name', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status'];
+    for (const field of requiredFields) {
+      if (campaignData[field] === undefined || campaignData[field] === '') {
+        return c.json<ApiResponse>({ 
+          success: false, 
+          error: `Missing required field: ${field}` 
+        }, 400);
+      }
+    }
+    
+    // Validate status values
+    const validStatuses = ['active', 'paused', 'inactive'];
+    if (!validStatuses.includes(campaignData.status)) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Invalid status. Must be: active, paused, or inactive' 
+      }, 400);
+    }
+    
+    // Validate payout_amount is a number
+    if (isNaN(parseFloat(campaignData.payout_amount))) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Payout amount must be a valid number' 
+      }, 400);
+    }
+    
+    // Update campaign
+    const updatedCampaign = await db.updateCampaign(campaignId, campaignData);
+    
+    return c.json<ApiResponse<Campaign>>({
+      success: true,
+      data: updatedCampaign,
+      message: 'Campaign updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating campaign:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to update campaign' 
+    }, 500);
+  }
+});
+
 // Get affiliate dashboard stats
 app.get('/api/dashboard/stats', async (c) => {
   try {

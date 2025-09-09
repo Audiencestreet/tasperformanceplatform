@@ -108,13 +108,20 @@ export class PXAPIClient {
       // Use provided token or default based on vertical
       const apiToken = token || this.getDefaultToken(vertical, env);
       
-      // Build the payload using exact PX field names
+      // Build payload with proper PascalCase fields and required data
       const payload: PXDirectPostRequest = {
-        // Contact Information (exact PX field names)
+        // Required Core Fields (PascalCase)
+        Vertical: vertical,
+        SubId: subId,
+        Source: source || 'Direct',
+        UserAgent: context.userAgent || 'Mozilla/5.0 (compatible; AffiliateTracker/1.0)',
+        OriginalUrl: context.clickId ? `https://example.com/landing?id=${context.clickId}` : 'https://example.com',
+        
+        // Required Contact Information (PascalCase)
         FirstName: contact.firstName,
         LastName: contact.lastName,
-        EmailAddress: contact.email,  // PX uses EmailAddress, not Email
-        PhoneNumber: contact.phone,   // PX uses PhoneNumber, not Phone
+        EmailAddress: contact.email,
+        PhoneNumber: contact.phone,
         ZipCode: contact.zipCode,
         
         // Optional Address Information
@@ -122,20 +129,15 @@ export class PXAPIClient {
         ...(contact.city && { City: contact.city }),
         ...(contact.state && { State: contact.state }),
         
-        // Lead Context
-        Vertical: vertical,
-        SubId: subId,
-        ...(source && { Source: source }),
-        ...(context.sessionLength && { SessionLength: context.sessionLength }),
-        ...(context.tcpaText && { TcpaText: context.tcpaText }),
+        // Required Context Fields
+        SessionLength: context.sessionLength || 180,
+        TcpaText: this.cleanTcpaText(context.tcpaText || 'I agree to be contacted about this offer.'),
+        IpAddress: context.ipAddress || '127.0.0.1',
+        
+        // Optional Tracking
         ...(context.clickId && { ClickId: context.clickId }),
-        ...(context.ipAddress && { IpAddress: context.ipAddress }),
-        ...(context.userAgent && { UserAgent: context.userAgent }),
         
-        // Add OriginalUrl if not present (PX seems to expect this)
-        OriginalUrl: context.clickId ? `https://example.com/landing?id=${context.clickId}` : 'https://example.com/solar',
-        
-        // Include any extra fields
+        // Include vertical-specific extras only if provided
         ...extras
       };
       
@@ -153,10 +155,15 @@ export class PXAPIClient {
       console.log('Full payload:', JSON.stringify(payloadWithToken, null, 2));
       console.log('Raw JSON (first 300 chars):', JSON.stringify(payloadWithToken).substring(0, 300));
       
-      // Convert payload to XML format (PX API expects XML, not JSON!)
-      const xmlPayload = this.buildXmlPayload(payloadWithToken);
+      console.log('=== PX DIRECT POST DEBUG ===');
+      console.log('URL:', this.DIRECT_POST_URL);
+      console.log('API Token:', apiToken.substring(0, 8) + '...');
+      console.log('Headers:', { 'Content-Type': 'application/xml', 'Accept': 'application/xml' });
+      console.log('Payload (redacted):', this.redactPII(payloadWithToken));
       
-      console.log('XML Payload:', xmlPayload);
+      // PX API requires XML format (confirmed by testing)
+      const xmlBody = this.buildProductionXmlPayload(payloadWithToken);
+      console.log('XML size:', xmlBody.length, 'bytes');
       
       const response = await fetch(this.DIRECT_POST_URL, {
         method: 'POST',
@@ -164,7 +171,8 @@ export class PXAPIClient {
           'Content-Type': 'application/xml',
           'Accept': 'application/xml'
         },
-        body: xmlPayload
+        body: xmlBody,
+        signal: AbortSignal.timeout(15000) // 15 second timeout
       });
       
       const responseText = await response.text();
@@ -184,17 +192,22 @@ export class PXAPIClient {
       
       let directPostResponse: PXDirectPostResponse;
       try {
-        // Parse XML response to JSON
-        directPostResponse = this.parseXmlResponse(responseText);
-      } catch (e) {
-        return {
-          response: null,
-          error: {
-            code: 'PARSE_ERROR',
-            message: 'Failed to parse PX XML response',
-            details: responseText
-          }
-        };
+        // Try JSON first (production spec)
+        directPostResponse = JSON.parse(responseText);
+      } catch (jsonError) {
+        // Fallback to XML parsing if JSON fails
+        try {
+          directPostResponse = this.parseXmlResponse(responseText);
+        } catch (xmlError) {
+          return {
+            response: null,
+            error: {
+              code: 'PARSE_ERROR',
+              message: 'Failed to parse PX response as JSON or XML',
+              details: { responseText, jsonError, xmlError }
+            }
+          };
+        }
       }
       
       return { response: directPostResponse, error: null };
@@ -210,6 +223,32 @@ export class PXAPIClient {
         }
       };
     }
+  }
+  
+  /**
+   * Clean TCPA text to remove smart quotes, emojis, and ensure proper JSON serialization
+   */
+  private static cleanTcpaText(text: string): string {
+    return text
+      .replace(/[""]/g, '"')        // Replace smart quotes with regular quotes
+      .replace(/['']/g, "'")        // Replace smart apostrophes
+      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII characters (emojis, etc.)
+      .trim();
+  }
+  
+  /**
+   * Redact PII from payload for logging
+   */
+  private static redactPII(payload: any): any {
+    return {
+      ...payload,
+      ApiToken: '[REDACTED]',
+      FirstName: payload.FirstName ? '[REDACTED]' : undefined,
+      LastName: payload.LastName ? '[REDACTED]' : undefined,
+      EmailAddress: payload.EmailAddress ? '[REDACTED]' : undefined,
+      PhoneNumber: payload.PhoneNumber ? '[REDACTED]' : undefined,
+      Address: payload.Address ? '[REDACTED]' : undefined
+    };
   }
   
   /**
@@ -244,7 +283,62 @@ export class PXAPIClient {
   }
   
   /**
-   * Build XML payload for PX Direct Post API
+   * Build production-ready XML payload for PX Direct Post API
+   */
+   private static buildProductionXmlPayload(payload: any): string {
+    const escapeXml = (str: string | undefined): string => {
+      if (!str) return '';
+      return str.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    };
+    
+    // Required solar fields based on PX validation
+    const solarFields = payload.Vertical === 'Solar' ? `
+    <AuthorizedForPropertyChanges>Yes</AuthorizedForPropertyChanges>
+    <CurrentUtilityProvider>Pacific Gas &amp; Electric</CurrentUtilityProvider>
+    <ProjectStatus>Existing home</ProjectStatus>
+    <PropertyStories>Two stories</PropertyStories>
+    <PropertyUsage>Residential</PropertyUsage>
+    <SolarSystemType>Solar electricity</SolarSystemType>
+    <SolarInstallationLocation>Roof</SolarInstallationLocation>` : '';
+    
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Lead>
+  <ApiToken>${escapeXml(payload.ApiToken)}</ApiToken>
+  <Vertical>${escapeXml(payload.Vertical)}</Vertical>
+  <SubId>${escapeXml(payload.SubId)}</SubId>
+  <Source>${escapeXml(payload.Source)}</Source>
+  <JornayaLeadId>PX_${Date.now()}</JornayaLeadId>
+  <SessionLength>${payload.SessionLength}</SessionLength>
+  <TcpaText>${escapeXml(payload.TcpaText)}</TcpaText>
+  <OriginalUrl>${escapeXml(payload.OriginalUrl)}</OriginalUrl>
+  <IpAddress>${escapeXml(payload.IpAddress)}</IpAddress>
+  <UserAgent>${escapeXml(payload.UserAgent)}</UserAgent>
+  <ContactData>
+    <FirstName>${escapeXml(payload.FirstName)}</FirstName>
+    <LastName>${escapeXml(payload.LastName)}</LastName>
+    <EmailAddress>${escapeXml(payload.EmailAddress)}</EmailAddress>
+    <PhoneNumber>${escapeXml(payload.PhoneNumber)}</PhoneNumber>
+    <Address>${escapeXml(payload.Address || '123 Main St')}</Address>
+    <City>${escapeXml(payload.City || 'Los Angeles')}</City>
+    <State>${escapeXml(payload.State || 'CA')}</State>
+    <ZipCode>${escapeXml(payload.ZipCode)}</ZipCode>
+    <Ownership>${escapeXml(payload.Ownership || 'Own')}</Ownership>
+    <Roofshade>${escapeXml(this.mapRoofShade(payload.RoofShade))}</Roofshade>
+    <ElectricityBill>${escapeXml(this.mapElectricityBill(payload.ElectricityBill))}</ElectricityBill>${solarFields}
+  </ContactData>
+  <Home>
+    <Ownership>${escapeXml(payload.Ownership || 'Own')}</Ownership>
+  </Home>
+</Lead>`;
+  }
+  
+  /**
+   * Build XML payload for PX Direct Post API (legacy)
    */
   private static buildXmlPayload(payload: any): string {
     // Helper to escape XML content

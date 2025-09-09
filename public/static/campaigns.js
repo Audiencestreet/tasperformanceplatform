@@ -97,6 +97,10 @@ class CampaignManager {
                                 class="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200">
                             <i class="fas fa-link mr-1"></i>Tracking Link
                         </button>
+                        <button onclick="campaignManager.editCampaign(${campaign.id})" 
+                                class="px-3 py-1 text-sm bg-orange-100 text-orange-700 rounded hover:bg-orange-200">
+                            <i class="fas fa-edit mr-1"></i>Edit
+                        </button>
                         <button onclick="campaignManager.managePostbackParams(${campaign.id})" 
                                 class="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200">
                             <i class="fas fa-cog mr-1"></i>Postback Config
@@ -435,6 +439,156 @@ class CampaignManager {
         }
     }
     
+    async editCampaign(campaignId) {
+        try {
+            const response = await axios.get(`/api/campaigns/${campaignId}`);
+            if (response.data.success) {
+                const campaign = response.data.data;
+                this.showEditCampaignModal(campaign);
+            } else {
+                this.showNotification('Failed to load campaign details', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading campaign for edit:', error);
+            this.showNotification('Network error loading campaign', 'error');
+        }
+    }
+    
+    showEditCampaignModal(campaign) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <i class="fas fa-edit mr-2"></i>Edit Campaign - ${campaign.name}
+                        </h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <form id="edit-campaign-form-${campaign.id}" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Campaign Name</label>
+                                <input type="text" name="name" value="${campaign.name}" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                                <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="active" ${campaign.status === 'active' ? 'selected' : ''}>Active</option>
+                                    <option value="paused" ${campaign.status === 'paused' ? 'selected' : ''}>Paused</option>
+                                    <option value="inactive" ${campaign.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Traffic Type</label>
+                                <select name="traffic_type" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="Email" ${campaign.traffic_type === 'Email' ? 'selected' : ''}>Email</option>
+                                    <option value="Facebook" ${campaign.traffic_type === 'Facebook' ? 'selected' : ''}>Facebook</option>
+                                    <option value="Instagram" ${campaign.traffic_type === 'Instagram' ? 'selected' : ''}>Instagram</option>
+                                    <option value="TikTok" ${campaign.traffic_type === 'TikTok' ? 'selected' : ''}>TikTok</option>
+                                    <option value="Twitter" ${campaign.traffic_type === 'Twitter' ? 'selected' : ''}>Twitter</option>
+                                    <option value="Taboola" ${campaign.traffic_type === 'Taboola' ? 'selected' : ''}>Taboola</option>
+                                    <option value="Outbrain" ${campaign.traffic_type === 'Outbrain' ? 'selected' : ''}>Outbrain</option>
+                                    <option value="GoogleAds" ${campaign.traffic_type === 'GoogleAds' ? 'selected' : ''}>Google Ads</option>
+                                    <option value="Display" ${campaign.traffic_type === 'Display' ? 'selected' : ''}>Display</option>
+                                    <option value="Native" ${campaign.traffic_type === 'Native' ? 'selected' : ''}>Native</option>
+                                    <option value="Search" ${campaign.traffic_type === 'Search' ? 'selected' : ''}>Search</option>
+                                    <option value="Direct" ${campaign.traffic_type === 'Direct' ? 'selected' : ''}>Direct</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Sub ID</label>
+                                <select name="sub_id" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="EM01" ${campaign.sub_id === 'EM01' ? 'selected' : ''}>EM01 - Email #1</option>
+                                    <option value="EM02" ${campaign.sub_id === 'EM02' ? 'selected' : ''}>EM02 - Email #2</option>
+                                    <option value="FB01" ${campaign.sub_id === 'FB01' ? 'selected' : ''}>FB01 - Facebook #1</option>
+                                    <option value="IG01" ${campaign.sub_id === 'IG01' ? 'selected' : ''}>IG01 - Instagram #1</option>
+                                    <option value="TT01" ${campaign.sub_id === 'TT01' ? 'selected' : ''}>TT01 - TikTok #1</option>
+                                    <option value="TW01" ${campaign.sub_id === 'TW01' ? 'selected' : ''}>TW01 - Twitter #1</option>
+                                    <option value="TB01" ${campaign.sub_id === 'TB01' ? 'selected' : ''}>TB01 - Taboola #1</option>
+                                    <option value="OB01" ${campaign.sub_id === 'OB01' ? 'selected' : ''}>OB01 - Outbrain #1</option>
+                                    <option value="GG01" ${campaign.sub_id === 'GG01' ? 'selected' : ''}>GG01 - Google Ads #1</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Offer ID</label>
+                                <input type="text" name="offer_id" value="${campaign.offer_id}" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Payout Amount ($)</label>
+                            <input type="number" name="payout_amount" value="${campaign.payout_amount}" 
+                                   step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+                            <textarea name="description" rows="3" 
+                                      class="w-full px-3 py-2 border border-gray-300 rounded-md" 
+                                      placeholder="Campaign description and notes...">${campaign.description || ''}</textarea>
+                        </div>
+                        
+                        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                            <button type="button" 
+                                    onclick="this.closest('.fixed').remove()" 
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <button type="submit" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                                <i class="fas fa-save mr-1"></i>Update Campaign
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Setup form submission
+        const form = document.getElementById(`edit-campaign-form-${campaign.id}`);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.updateCampaign(campaign.id, form, modal);
+        });
+    }
+    
+    async updateCampaign(campaignId, form, modal) {
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        // Convert payout_amount to number
+        data.payout_amount = parseFloat(data.payout_amount);
+        
+        try {
+            const response = await axios.put(`/api/campaigns/${campaignId}`, data);
+            if (response.data.success) {
+                this.showNotification('Campaign updated successfully!', 'success');
+                modal.remove();
+                
+                // Reload campaigns to show updated data
+                await this.loadCampaigns();
+            } else {
+                this.showNotification(response.data.message || 'Failed to update campaign', 'error');
+            }
+        } catch (error) {
+            console.error('Error updating campaign:', error);
+            this.showNotification('Network error updating campaign', 'error');
+        }
+    }
+
     showError(message) {
         const container = document.getElementById('campaigns-list');
         container.innerHTML = `

@@ -81,6 +81,33 @@ export class Database {
     return result.results;
   }
   
+  async updateCampaign(id: number, updates: Partial<Campaign>): Promise<Campaign> {
+    const allowedFields = ['name', 'description', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status'];
+    const filteredUpdates = Object.keys(updates)
+      .filter(key => allowedFields.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = updates[key];
+        return obj;
+      }, {} as any);
+    
+    // Add updated_at timestamp
+    filteredUpdates.updated_at = new Date().toISOString();
+    
+    const setClause = Object.keys(filteredUpdates).map(key => `${key} = ?`).join(', ');
+    const values = Object.values(filteredUpdates);
+    
+    const result = await this.db.prepare(`
+      UPDATE campaigns SET ${setClause} WHERE id = ?
+      RETURNING *
+    `).bind(...values, id).first<Campaign>();
+    
+    if (!result) {
+      throw new Error('Failed to update campaign or campaign not found');
+    }
+    
+    return result;
+  }
+  
   // Lead methods
   async createLead(lead: Omit<Lead, 'id' | 'created_at'>): Promise<Lead> {
     const result = await this.db.prepare(`
