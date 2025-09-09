@@ -106,7 +106,7 @@ export class Database {
   }
   
   async updateCampaign(id: number, updates: Partial<Campaign>): Promise<Campaign> {
-    const allowedFields = ['name', 'description', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status'];
+    const allowedFields = ['name', 'description', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status', 'affiliate_id'];
     const filteredUpdates = Object.keys(updates)
       .filter(key => allowedFields.includes(key))
       .reduce((obj, key) => {

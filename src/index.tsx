@@ -786,32 +786,44 @@ app.put('/api/campaigns/:id', async (c) => {
       }, 404);
     }
     
-    // Validate required fields
-    const requiredFields = ['name', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status'];
-    for (const field of requiredFields) {
-      if (campaignData[field] === undefined || campaignData[field] === '') {
-        return c.json<ApiResponse>({ 
-          success: false, 
-          error: `Missing required field: ${field}` 
-        }, 400);
-      }
+    // Only validate provided fields (for partial updates)
+    const providedFields = Object.keys(campaignData);
+    const validFields = ['name', 'offer_id', 'sub_id', 'traffic_type', 'payout_amount', 'status', 'affiliate_id', 'description'];
+    
+    // Check if any invalid fields are provided
+    const invalidFields = providedFields.filter(field => !validFields.includes(field));
+    if (invalidFields.length > 0) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: `Invalid fields: ${invalidFields.join(', ')}` 
+      }, 400);
     }
     
-    // Validate status values
-    const validStatuses = ['active', 'paused', 'inactive'];
-    if (!validStatuses.includes(campaignData.status)) {
+    // If status is provided, validate it
+    if (campaignData.status && !['active', 'paused', 'inactive'].includes(campaignData.status)) {
       return c.json<ApiResponse>({ 
         success: false, 
         error: 'Invalid status. Must be: active, paused, or inactive' 
       }, 400);
     }
     
-    // Validate payout_amount is a number
-    if (isNaN(parseFloat(campaignData.payout_amount))) {
+    // If payout_amount is provided, validate it's a number
+    if (campaignData.payout_amount !== undefined && isNaN(parseFloat(campaignData.payout_amount))) {
       return c.json<ApiResponse>({ 
         success: false, 
         error: 'Payout amount must be a valid number' 
       }, 400);
+    }
+    
+    // If affiliate_id is provided, validate it exists
+    if (campaignData.affiliate_id !== undefined) {
+      const affiliate = await db.getAffiliate(campaignData.affiliate_id);
+      if (!affiliate) {
+        return c.json<ApiResponse>({ 
+          success: false, 
+          error: 'Affiliate not found' 
+        }, 404);
+      }
     }
     
     // Update campaign
