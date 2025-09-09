@@ -92,7 +92,16 @@ export class Database {
   }
   
   async getAllCampaigns(): Promise<Campaign[]> {
-    const result = await this.db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all<Campaign>();
+    const result = await this.db.prepare(`
+      SELECT 
+        c.*,
+        a.name as affiliate_name,
+        a.email as affiliate_email,
+        a.status as affiliate_status
+      FROM campaigns c
+      LEFT JOIN affiliates a ON c.affiliate_id = a.id
+      ORDER BY c.created_at DESC
+    `).all<any>();
     return result.results;
   }
   

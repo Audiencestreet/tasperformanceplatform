@@ -73,7 +73,24 @@ class CampaignManager {
         return `
             <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
                 <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-semibold text-gray-900">${campaign.name}</h3>
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">${campaign.name}</h3>
+                        ${campaign.affiliate_name ? `
+                            <p class="text-sm text-gray-600 mt-1">
+                                <i class="fas fa-user text-blue-600 mr-1"></i>
+                                <strong>Affiliate:</strong> ${campaign.affiliate_name}
+                                <span class="text-gray-400">•</span>
+                                <span class="text-xs ${campaign.affiliate_status === 'active' ? 'text-green-600' : 'text-red-600'}">
+                                    ${campaign.affiliate_status}
+                                </span>
+                            </p>
+                        ` : `
+                            <p class="text-sm text-red-600 mt-1">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                <strong>No affiliate linked</strong>
+                            </p>
+                        `}
+                    </div>
                     <span class="px-2 py-1 text-xs rounded-full ${statusColor} font-medium">
                         ${campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
                     </span>
@@ -109,7 +126,7 @@ class CampaignManager {
                     <div class="text-sm text-gray-500">
                         Created: ${this.formatDate(campaign.created_at)}
                     </div>
-                    <div class="flex space-x-2">
+                    <div class="flex flex-wrap gap-2">
                         <button onclick="campaignManager.viewCampaignStats(${campaign.id})" 
                                 class="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200">
                             <i class="fas fa-chart-bar mr-1"></i>Stats
@@ -117,6 +134,10 @@ class CampaignManager {
                         <button onclick="campaignManager.generateTrackingLink(${campaign.id})" 
                                 class="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200">
                             <i class="fas fa-link mr-1"></i>Tracking Link
+                        </button>
+                        <button onclick="campaignManager.linkAffiliate(${campaign.id})" 
+                                class="px-3 py-1 text-sm bg-cyan-100 text-cyan-700 rounded hover:bg-cyan-200">
+                            <i class="fas fa-user-plus mr-1"></i>Link Affiliate
                         </button>
                         <button onclick="campaignManager.editCampaign(${campaign.id})" 
                                 class="px-3 py-1 text-sm bg-orange-100 text-orange-700 rounded hover:bg-orange-200">
@@ -208,17 +229,221 @@ class CampaignManager {
         document.body.appendChild(modal);
     }
     
-    generateTrackingLink(campaignId) {
-        const baseUrl = window.location.origin;
-        const trackingUrl = `${baseUrl}/?campaign_id=${campaignId}&utm_source=affiliate&utm_medium=direct`;
+    async generateTrackingLink(campaignId) {
+        try {
+            // Get campaign details and affiliates for selection
+            const [campaignResponse, affiliatesResponse] = await Promise.all([
+                axios.get(`/api/campaigns/${campaignId}`),
+                axios.get('/api/affiliates')
+            ]);
+            
+            if (campaignResponse.data.success && affiliatesResponse.data.success) {
+                const campaign = campaignResponse.data.data;
+                const affiliates = affiliatesResponse.data.data;
+                this.showTrackingLinkGenerator(campaign, affiliates);
+            } else {
+                this.showNotification('Failed to load campaign or affiliate data', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading data for tracking link:', error);
+            this.showNotification('Network error loading data', 'error');
+        }
+    }
+    
+    showTrackingLinkGenerator(campaign, affiliates) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <i class="fas fa-link mr-2"></i>Generate Tracking Link - ${campaign.name}
+                        </h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <form id="tracking-link-form-${campaign.id}" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Select Affiliate *</label>
+                            <select name="affiliate_id" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                <option value="">Choose an affiliate...</option>
+                                ${affiliates.map(affiliate => `
+                                    <option value="${affiliate.id}" ${affiliate.id === campaign.affiliate_id ? 'selected' : ''}>
+                                        ${affiliate.name} (${affiliate.email})
+                                    </option>
+                                `).join('')}
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">This identifies which affiliate is promoting this campaign</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">UTM Source</label>
+                                <input type="text" name="utm_source" value="affiliate" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">UTM Medium</label>
+                                <select name="utm_medium" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                                    <option value="email">Email</option>
+                                    <option value="social">Social Media</option>
+                                    <option value="display">Display Ads</option>
+                                    <option value="search">Search</option>
+                                    <option value="direct">Direct</option>
+                                    <option value="referral">Referral</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">UTM Campaign</label>
+                                <input type="text" name="utm_campaign" placeholder="e.g., summer-promo" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">UTM Content</label>
+                                <input type="text" name="utm_content" placeholder="e.g., banner-top" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            </div>
+                        </div>
+                        
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <h4 class="font-medium text-blue-900 mb-2">
+                                <i class="fas fa-info-circle mr-1"></i>Generated Tracking URL
+                            </h4>
+                            <div id="generated-url-${campaign.id}" class="bg-white p-3 rounded border text-sm font-mono break-all">
+                                <span class="text-gray-500">Select an affiliate to generate URL...</span>
+                            </div>
+                            <div class="flex space-x-2 mt-3">
+                                <button type="button" onclick="campaignManager.copyTrackingUrl('generated-url-${campaign.id}')" 
+                                        class="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+                                    <i class="fas fa-copy mr-1"></i>Copy URL
+                                </button>
+                                <button type="button" onclick="campaignManager.generatePreview(${campaign.id})" 
+                                        class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+                                    <i class="fas fa-refresh mr-1"></i>Update Preview
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                            <button type="button" 
+                                    onclick="this.closest('.fixed').remove()" 
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+                                Close
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
         
-        // Copy to clipboard
-        navigator.clipboard.writeText(trackingUrl).then(() => {
-            this.showNotification('Tracking link copied to clipboard!', 'success');
-        }).catch(() => {
-            // Fallback: show the link in a modal
-            this.showTrackingLinkModal(trackingUrl);
-        });
+        document.body.appendChild(modal);
+        
+        // Setup form change listener for live preview
+        const form = document.getElementById(`tracking-link-form-${campaign.id}`);
+        form.addEventListener('change', () => this.generatePreview(campaign.id));
+        form.addEventListener('input', () => this.generatePreview(campaign.id));
+        
+        // Generate initial preview
+        setTimeout(() => this.generatePreview(campaign.id), 100);
+    }
+    
+    generatePreview(campaignId) {
+        const form = document.getElementById(`tracking-link-form-${campaignId}`);
+        if (!form) return;
+        
+        const formData = new FormData(form);
+        const affiliateId = formData.get('affiliate_id');
+        
+        if (!affiliateId) {
+            const urlElement = document.getElementById(`generated-url-${campaignId}`);
+            urlElement.innerHTML = '<span class="text-gray-500">Select an affiliate to generate URL...</span>';
+            return;
+        }
+        
+        const baseUrl = window.location.origin;
+        const params = new URLSearchParams();
+        
+        // Add required parameters
+        params.append('campaign_id', campaignId);
+        params.append('affiliate_id', affiliateId);
+        
+        // Add UTM parameters if provided
+        if (formData.get('utm_source')) params.append('utm_source', formData.get('utm_source'));
+        if (formData.get('utm_medium')) params.append('utm_medium', formData.get('utm_medium'));
+        if (formData.get('utm_campaign')) params.append('utm_campaign', formData.get('utm_campaign'));
+        if (formData.get('utm_content')) params.append('utm_content', formData.get('utm_content'));
+        
+        // Generate unique click ID for this link
+        const clickId = 'click_' + Math.random().toString(36).substring(2, 15);
+        params.append('click_id', clickId);
+        
+        const trackingUrl = `${baseUrl}/?${params.toString()}`;
+        
+        const urlElement = document.getElementById(`generated-url-${campaignId}`);
+        urlElement.innerHTML = trackingUrl;
+    }
+    
+    async copyTrackingUrl(elementId) {
+        const urlElement = document.getElementById(elementId);
+        if (!urlElement) return;
+        
+        const url = urlElement.textContent.trim();
+        if (!url || url.includes('Select an affiliate')) {
+            this.showNotification('Please generate a URL first', 'error');
+            return;
+        }
+        
+        try {
+            await navigator.clipboard.writeText(url);
+            this.showNotification('Tracking URL copied to clipboard!', 'success');
+        } catch (error) {
+            console.error('Failed to copy:', error);
+            this.showTrackingLinkFallback(url);
+        }
+    }
+    
+    showTrackingLinkFallback(url) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-20 mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Copy Tracking URL</h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Tracking URL:</label>
+                        <textarea readonly class="w-full p-3 border border-gray-300 rounded text-sm font-mono" 
+                                  rows="4" onclick="this.select()">${url}</textarea>
+                    </div>
+                    
+                    <div class="flex space-x-2">
+                        <button onclick="this.previousElementSibling.previousElementSibling.querySelector('textarea').select(); document.execCommand('copy'); this.textContent = 'Copied!'" 
+                                class="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+                            <i class="fas fa-copy mr-1"></i>Select & Copy
+                        </button>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
     }
     
     showTrackingLinkModal(url) {
@@ -472,6 +697,117 @@ class CampaignManager {
         } catch (error) {
             console.error('Error loading campaign for edit:', error);
             this.showNotification('Network error loading campaign', 'error');
+        }
+    }
+    
+    async linkAffiliate(campaignId) {
+        try {
+            // Get both campaign and affiliates data
+            const [campaignResponse, affiliatesResponse] = await Promise.all([
+                axios.get(`/api/campaigns/${campaignId}`),
+                axios.get('/api/affiliates')
+            ]);
+            
+            if (campaignResponse.data.success && affiliatesResponse.data.success) {
+                const campaign = campaignResponse.data.data;
+                const affiliates = affiliatesResponse.data.data;
+                this.showLinkAffiliateModal(campaign, affiliates);
+            } else {
+                this.showNotification('Failed to load campaign or affiliate data', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading data for affiliate linking:', error);
+            this.showNotification('Network error loading data', 'error');
+        }
+    }
+    
+    showLinkAffiliateModal(campaign, affiliates) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-20 mx-auto p-6 border w-full max-w-lg shadow-lg rounded-md bg-white">
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <i class="fas fa-user-plus mr-2"></i>Link Affiliate - ${campaign.name}
+                        </h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <form id="link-affiliate-form-${campaign.id}" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Select Affiliate *</label>
+                            <select name="affiliate_id" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                <option value="">Choose an affiliate...</option>
+                                ${affiliates.map(affiliate => `
+                                    <option value="${affiliate.id}" ${affiliate.id === campaign.affiliate_id ? 'selected' : ''}>
+                                        ${affiliate.name} (${affiliate.email}) - ${affiliate.status}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <h4 class="font-medium text-blue-900 mb-2">
+                                <i class="fas fa-info-circle mr-1"></i>Linking Campaign to Affiliate
+                            </h4>
+                            <ul class="text-sm text-blue-800 space-y-1">
+                                <li>• The selected affiliate will be associated with this campaign</li>
+                                <li>• All tracking links will identify this affiliate</li>
+                                <li>• Postback URLs can be configured for this affiliate</li>
+                                <li>• Lead attribution will be tracked to this affiliate</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                            <button type="button" 
+                                    onclick="this.closest('.fixed').remove()" 
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <button type="submit" 
+                                    class="px-4 py-2 bg-cyan-600 text-white rounded-md hover:bg-cyan-700">
+                                <i class="fas fa-link mr-1"></i>Link Affiliate
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Setup form submission
+        const form = document.getElementById(`link-affiliate-form-${campaign.id}`);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.updateCampaignAffiliate(campaign.id, form, modal);
+        });
+    }
+    
+    async updateCampaignAffiliate(campaignId, form, modal) {
+        const formData = new FormData(form);
+        const data = {
+            affiliate_id: parseInt(formData.get('affiliate_id'))
+        };
+        
+        try {
+            const response = await axios.put(`/api/campaigns/${campaignId}`, data);
+            if (response.data.success) {
+                this.showNotification('Affiliate linked successfully!', 'success');
+                modal.remove();
+                
+                // Reload campaigns to show updated affiliate linkage
+                await this.loadCampaigns();
+            } else {
+                this.showNotification(response.data.error || 'Failed to link affiliate', 'error');
+            }
+        } catch (error) {
+            console.error('Error linking affiliate:', error);
+            this.showNotification('Network error linking affiliate', 'error');
         }
     }
     

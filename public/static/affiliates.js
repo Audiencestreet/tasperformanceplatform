@@ -369,11 +369,19 @@ class AffiliateManager {
     }
     
     async copyApiKey(apiKey) {
+        // Check if clipboard API is available
+        if (!navigator.clipboard) {
+            console.log('Clipboard API not available, showing fallback modal');
+            this.showApiKeyModal(apiKey);
+            return;
+        }
+        
         try {
             await navigator.clipboard.writeText(apiKey);
             this.showNotification('API key copied to clipboard!', 'success');
         } catch (error) {
-            // Fallback for browsers that don't support clipboard API
+            console.error('Clipboard copy failed:', error);
+            // Fallback for browsers that don't support clipboard API or have permissions issues
             this.showApiKeyModal(apiKey);
         }
     }
@@ -398,7 +406,25 @@ class AffiliateManager {
                     </div>
                     
                     <div class="flex space-x-2">
-                        <button onclick="navigator.clipboard.writeText('${apiKey}').then(() => this.textContent = 'Copied!')" 
+                        <button onclick="
+                            const textarea = this.parentElement.previousElementSibling.querySelector('textarea');
+                            textarea.select();
+                            textarea.setSelectionRange(0, 99999);
+                            try {
+                                if (navigator.clipboard) {
+                                    navigator.clipboard.writeText('${apiKey}').then(() => {
+                                        this.textContent = 'Copied!';
+                                        setTimeout(() => this.innerHTML = '<i class=\\'fas fa-copy mr-1\\'></i>Copy Key', 2000);
+                                    });
+                                } else {
+                                    document.execCommand('copy');
+                                    this.textContent = 'Copied!';
+                                    setTimeout(() => this.innerHTML = '<i class=\\'fas fa-copy mr-1\\'></i>Copy Key', 2000);
+                                }
+                            } catch(err) {
+                                alert('Please manually select and copy the API key above');
+                            }
+                        " 
                                 class="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
                             <i class="fas fa-copy mr-1"></i>Copy Key
                         </button>
