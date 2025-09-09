@@ -1368,8 +1368,12 @@ app.get('/campaigns', (c) => {
         
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div class="bg-white rounded-lg shadow">
-                <div class="px-6 py-4 border-b border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h2 class="text-lg font-semibold text-gray-900">All Campaigns</h2>
+                    <button onclick="campaignManager.showCreateCampaignModal()" 
+                            class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center">
+                        <i class="fas fa-plus mr-2"></i>Create Campaign
+                    </button>
                 </div>
                 
                 <div id="campaigns-list" class="p-6">

@@ -28,10 +28,31 @@ class CampaignManager {
         
         if (!campaigns || campaigns.length === 0) {
             container.innerHTML = `
-                <div class="text-center py-8 text-gray-500">
-                    <i class="fas fa-bullhorn text-4xl mb-4"></i>
-                    <h3 class="text-lg font-medium mb-2">No Campaigns Found</h3>
-                    <p>There are no campaigns configured yet.</p>
+                <div class="text-center py-12 text-gray-500">
+                    <i class="fas fa-bullhorn text-6xl mb-6 text-gray-400"></i>
+                    <h3 class="text-xl font-medium mb-3 text-gray-700">No Campaigns Found</h3>
+                    <p class="text-gray-500 mb-6 max-w-md mx-auto">Get started by creating your first campaign. Set up tracking links, configure payouts, and start generating leads!</p>
+                    <button onclick="campaignManager.showCreateCampaignModal()" 
+                            class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 inline-flex items-center text-lg font-medium">
+                        <i class="fas fa-plus mr-2"></i>Create Your First Campaign
+                    </button>
+                    <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto text-sm">
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <i class="fas fa-link text-blue-600 text-lg mb-2"></i>
+                            <h4 class="font-medium text-blue-900">Tracking Links</h4>
+                            <p class="text-blue-700">Generate unique tracking URLs for each campaign</p>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg">
+                            <i class="fas fa-dollar-sign text-green-600 text-lg mb-2"></i>
+                            <h4 class="font-medium text-green-900">Payout Management</h4>
+                            <p class="text-green-700">Configure commission rates and payment terms</p>
+                        </div>
+                        <div class="bg-purple-50 p-4 rounded-lg">
+                            <i class="fas fa-chart-bar text-purple-600 text-lg mb-2"></i>
+                            <h4 class="font-medium text-purple-900">Performance Analytics</h4>
+                            <p class="text-purple-700">Monitor clicks, conversions, and revenue</p>
+                        </div>
+                    </div>
                 </div>
             `;
             return;
@@ -586,6 +607,166 @@ class CampaignManager {
         } catch (error) {
             console.error('Error updating campaign:', error);
             this.showNotification('Network error updating campaign', 'error');
+        }
+    }
+
+    showCreateCampaignModal() {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
+        modal.innerHTML = `
+            <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">
+                            <i class="fas fa-plus mr-2"></i>Create New Campaign
+                        </h3>
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" 
+                                class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <form id="create-campaign-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Campaign Name *</label>
+                                <input type="text" name="name" placeholder="e.g. Facebook Solar Campaign" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
+                                <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="active">Active</option>
+                                    <option value="paused">Paused</option>
+                                    <option value="inactive">Inactive</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Traffic Type *</label>
+                                <select name="traffic_type" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="">Select Traffic Type</option>
+                                    <option value="Email">Email</option>
+                                    <option value="Facebook">Facebook</option>
+                                    <option value="Instagram">Instagram</option>
+                                    <option value="TikTok">TikTok</option>
+                                    <option value="Twitter">Twitter</option>
+                                    <option value="Taboola">Taboola</option>
+                                    <option value="Outbrain">Outbrain</option>
+                                    <option value="GoogleAds">Google Ads</option>
+                                    <option value="Display">Display</option>
+                                    <option value="Native">Native</option>
+                                    <option value="Search">Search</option>
+                                    <option value="Direct">Direct</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Sub ID *</label>
+                                <select name="sub_id" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="">Select Sub ID</option>
+                                    <option value="EM01">EM01 - Email #1</option>
+                                    <option value="EM02">EM02 - Email #2</option>
+                                    <option value="FB01">FB01 - Facebook #1</option>
+                                    <option value="IG01">IG01 - Instagram #1</option>
+                                    <option value="TT01">TT01 - TikTok #1</option>
+                                    <option value="TW01">TW01 - Twitter #1</option>
+                                    <option value="TB01">TB01 - Taboola #1</option>
+                                    <option value="OB01">OB01 - Outbrain #1</option>
+                                    <option value="GG01">GG01 - Google Ads #1</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Offer ID *</label>
+                                <input type="text" name="offer_id" placeholder="e.g. 122, 477" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Payout Amount ($) *</label>
+                                <input type="number" name="payout_amount" placeholder="25.00" 
+                                       step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Affiliate ID *</label>
+                                <select name="affiliate_id" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                                    <option value="">Select Affiliate</option>
+                                    <option value="1">Default Affiliate (ID: 1)</option>
+                                    <option value="2">Partner Affiliate (ID: 2)</option>
+                                    <option value="3">Premium Affiliate (ID: 3)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+                            <textarea name="description" rows="3" 
+                                      class="w-full px-3 py-2 border border-gray-300 rounded-md" 
+                                      placeholder="Campaign description and notes..."></textarea>
+                        </div>
+                        
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <h4 class="font-medium text-blue-900 mb-2">
+                                <i class="fas fa-info-circle mr-1"></i>Quick Campaign Setup Tips
+                            </h4>
+                            <ul class="text-sm text-blue-800 space-y-1">
+                                <li>• <strong>Sub ID Strategy:</strong> Use EM01/EM02 for Email, FB01 for Facebook, GG01 for Google Ads</li>
+                                <li>• <strong>Common Offer IDs:</strong> 122 (Solar), 477 (ADT Home Security)</li>
+                                <li>• <strong>Payout Ranges:</strong> Solar: $20-30, Security: $40-60, Health: $15-25</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                            <button type="button" 
+                                    onclick="this.closest('.fixed').remove()" 
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <button type="submit" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                                <i class="fas fa-plus mr-1"></i>Create Campaign
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Setup form submission
+        const form = document.getElementById('create-campaign-form');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.createCampaign(form, modal);
+        });
+    }
+    
+    async createCampaign(form, modal) {
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        // Convert payout_amount to number
+        data.payout_amount = parseFloat(data.payout_amount);
+        data.affiliate_id = parseInt(data.affiliate_id);
+        
+        try {
+            const response = await axios.post('/api/campaigns', data);
+            if (response.data.success) {
+                this.showNotification('Campaign created successfully!', 'success');
+                modal.remove();
+                
+                // Reload campaigns to show new campaign
+                await this.loadCampaigns();
+            } else {
+                this.showNotification(response.data.error || 'Failed to create campaign', 'error');
+            }
+        } catch (error) {
+            console.error('Error creating campaign:', error);
+            this.showNotification('Network error creating campaign', 'error');
         }
     }
 
