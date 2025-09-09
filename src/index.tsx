@@ -1455,6 +1455,200 @@ app.get('/api/postbacks/logs', async (c) => {
   }
 });
 
+// PX Postback Receiver - Handle conversion notifications from PX
+app.get('/api/postback/px', async (c) => {
+  try {
+    // Extract PX parameters
+    const aff_sub = c.req.query('aff_sub');           // SubId from tracking link
+    const aff_sub2 = c.req.query('aff_sub2');         // Click ID from tracking link
+    const transaction_id = c.req.query('transaction_id'); // PX lead/transaction ID
+    const payout = c.req.query('payout');             // Commission payout amount
+    const campaign_id = c.req.query('campaign_id');   // Campaign ID
+    const status = c.req.query('status');             // Conversion status
+    
+    console.log('=== PX POSTBACK RECEIVED ===');
+    console.log('Parameters:', {
+      aff_sub, aff_sub2, transaction_id, payout, campaign_id, status
+    });
+    console.log('Full query:', c.req.url);
+    
+    if (!c.env?.DB) {
+      console.error('Database not available for postback processing');
+      return c.json({ success: false, error: 'Database unavailable' }, 503);
+    }
+    
+    const db = new Database(c.env.DB);
+    
+    // Validate required parameters
+    if (!transaction_id || !campaign_id) {
+      console.error('Missing required parameters: transaction_id or campaign_id');
+      return c.json({ 
+        success: false, 
+        error: 'Missing required parameters: transaction_id and campaign_id are required' 
+      }, 400);
+    }
+    
+    // Prepare conversion data
+    const conversionData = {
+      campaign_id: parseInt(campaign_id),
+      affiliate_id: null, // Will be set from campaign lookup
+      status: status || 'conversion',
+      payout_amount: payout ? parseFloat(payout) : null
+    };
+    
+    // Get campaign details to find affiliate_id
+    const campaign = await db.getCampaign(parseInt(campaign_id));
+    if (campaign) {
+      conversionData.affiliate_id = campaign.affiliate_id;
+    }
+    
+    // For PX postbacks, we'll create a synthetic lead record first, then record the conversion
+    // This ensures foreign key constraints are satisfied
+    const leadResult = await db.db.prepare(`
+      INSERT INTO leads (
+        campaign_id, affiliate_id, lead_uuid, first_name, last_name, 
+        phone_number, zip_code, ping_status, post_status,
+        utm_source, utm_medium, utm_campaign, utm_content,
+        ip_address, user_agent
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING id
+    `).bind(
+      conversionData.campaign_id,
+      conversionData.affiliate_id || 1,
+      `px_${transaction_id}`,
+      'PX', 'Conversion',
+      '0000000000', '00000',
+      'converted', 'converted',
+      aff_sub || 'PX',
+      'postback',
+      `px_${transaction_id}`,
+      aff_sub2 || 'direct',
+      c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '127.0.0.1',
+      c.req.header('User-Agent') || 'PX-Postback/1.0'
+    ).first<{id: number}>();
+    
+    const leadId = leadResult?.id;
+    if (!leadId) {
+      throw new Error('Failed to create lead record for PX conversion');
+    }
+    
+    // Now record the conversion with the proper lead_id
+    await db.db.prepare(`
+      INSERT INTO conversions (
+        lead_id, campaign_id, affiliate_id, conversion_type, conversion_value,
+        source_platform, click_id, conversion_data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      leadId,
+      conversionData.campaign_id,
+      conversionData.affiliate_id || 1,
+      conversionData.status || 'conversion',
+      conversionData.payout_amount || 0.00,
+      'PX',
+      aff_sub2 || 'no_click_id',
+      JSON.stringify({
+        px_transaction_id: transaction_id,
+        aff_sub: aff_sub || null,
+        aff_sub2: aff_sub2 || null,
+        received_at: new Date().toISOString(),
+        raw_query: c.req.url
+      })
+    ).run();
+    
+    // Log success
+    console.log('PX postback processed successfully:', {
+      transaction_id,
+      campaign_id,
+      payout,
+      affiliate_id: conversionData.affiliate_id
+    });
+    
+    // Return success response to PX
+    return c.json({
+      success: true,
+      message: 'Conversion recorded successfully',
+      transaction_id: transaction_id,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error processing PX postback:', error);
+    
+    // Return error response to PX
+    return c.json({
+      success: false,
+      error: 'Failed to process conversion',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Tracking Link Handler - Process clicks and redirect to destination
+app.get('/track', async (c) => {
+  try {
+    const campaign_id = c.req.query('campaign_id');
+    const affiliate_id = c.req.query('affiliate_id');
+    const aff_sub = c.req.query('aff_sub');           // SubId for PX
+    const aff_sub2 = c.req.query('aff_sub2');         // Unique click ID for PX
+    const destination = c.req.query('destination');    // Final destination URL
+    
+    // UTM parameters
+    const utm_source = c.req.query('utm_source');
+    const utm_medium = c.req.query('utm_medium');
+    const utm_campaign = c.req.query('utm_campaign');
+    const utm_content = c.req.query('utm_content');
+    
+    if (!campaign_id || !affiliate_id) {
+      return c.redirect('https://example.com'); // Fallback destination
+    }
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      // Log the click
+      const clickData = {
+        click_id: aff_sub2 || `click_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`,
+        campaign_id: parseInt(campaign_id),
+        sub_id: aff_sub || 'unknown',
+        landing_url: destination || 'https://example.com',
+        ip_address: c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '127.0.0.1',
+        user_agent: c.req.header('User-Agent') || 'Unknown',
+        referrer: c.req.header('Referer') || '',
+        clicked_at: new Date().toISOString()
+      };
+      
+      await db.logClick(clickData);
+      
+      console.log('Click tracked:', {
+        campaign_id,
+        affiliate_id,
+        aff_sub,
+        aff_sub2: clickData.click_id,
+        ip: clickData.ip_address
+      });
+    }
+    
+    // Default destination for ADT Home Security
+    const defaultDestination = 'https://www.adt.com/';
+    const finalDestination = destination || defaultDestination;
+    
+    // Append tracking parameters to destination if it doesn't have them
+    const destinationUrl = new URL(finalDestination);
+    if (aff_sub) destinationUrl.searchParams.set('aff_sub', aff_sub);
+    if (aff_sub2) destinationUrl.searchParams.set('aff_sub2', aff_sub2);
+    if (utm_source) destinationUrl.searchParams.set('utm_source', utm_source);
+    if (utm_medium) destinationUrl.searchParams.set('utm_medium', utm_medium);
+    if (utm_campaign) destinationUrl.searchParams.set('utm_campaign', utm_campaign);
+    if (utm_content) destinationUrl.searchParams.set('utm_content', utm_content);
+    
+    return c.redirect(destinationUrl.toString());
+    
+  } catch (error) {
+    console.error('Error processing tracking link:', error);
+    return c.redirect('https://www.adt.com/'); // Fallback
+  }
+});
+
 // Main dashboard page
 app.get('/', (c) => {
   return c.html(`
