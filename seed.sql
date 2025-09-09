@@ -48,3 +48,32 @@ INSERT OR IGNORE INTO analytics (date, affiliate_id, campaign_id, leads_generate
   ('2024-01-14', 1, 2, 12, 12, 10, 10, 9, 270.00, 'Google'),
   ('2024-01-14', 2, 3, 10, 10, 7, 7, 6, 135.00, 'Social'),
   ('2024-01-14', 3, 4, 14, 14, 11, 11, 9, 247.50, 'Search');
+
+-- Sample postback URLs
+INSERT OR IGNORE INTO postback_urls (id, affiliate_id, campaign_id, name, url_template, trigger_events, http_method, status) VALUES 
+  (1, 1, 1, 'Facebook Campaign Postback', 'https://affiliate1.com/postback?lead_id={lead_id}&status={status}&payout={payout}&campaign={campaign_id}', '["ping_accepted", "post_successful", "conversion"]', 'GET', 'active'),
+  (2, 1, 2, 'Google Campaign Postback', 'https://affiliate1.com/postback?lead_id={lead_id}&status={status}&value={conversion_value}', '["post_successful", "conversion"]', 'GET', 'active'),
+  (3, 2, null, 'All Campaigns Postback', 'https://affiliate2.com/webhook', '["conversion"]', 'POST', 'active'),
+  (4, 3, 4, 'Search Campaign Postback', 'https://affiliate3.com/track?id={lead_uuid}&event={status}&amount={payout}', '["ping_accepted", "post_successful"]', 'GET', 'active');
+
+-- Sample conversions
+INSERT OR IGNORE INTO conversions (id, lead_id, campaign_id, affiliate_id, conversion_type, conversion_value, currency, source_platform, attribution_window_hours, time_to_conversion_hours) VALUES 
+  (1, 1, 1, 1, 'lead_qualified', 25.00, 'USD', 'facebook', 168, 2),
+  (2, 2, 1, 1, 'lead_qualified', 25.00, 'USD', 'facebook', 168, 1),
+  (3, 4, 3, 2, 'lead_qualified', 22.50, 'USD', 'google', 168, 4),
+  (4, 1, 1, 1, 'sale', 150.00, 'USD', 'postback', 168, 48),
+  (5, 2, 1, 1, 'sale', 200.00, 'USD', 'postback', 168, 72);
+
+-- Sample conversion pixels
+INSERT OR IGNORE INTO conversion_pixels (id, campaign_id, pixel_type, pixel_id, conversion_label, event_name, status) VALUES 
+  (1, 1, 'google', 'AW-123456789', 'conversion_label_123', 'conversion', 'active'),
+  (2, 1, 'facebook', '123456789012345', null, 'Lead', 'active'),
+  (3, 2, 'google', 'AW-987654321', 'conversion_label_456', 'conversion', 'active'),
+  (4, 3, 'facebook', '987654321098765', null, 'Lead', 'active');
+
+-- Sample postback logs
+INSERT OR IGNORE INTO postback_logs (postback_url_id, lead_id, event_type, request_url, request_method, response_status, success, response_time_ms) VALUES 
+  (1, 1, 'ping_accepted', 'https://affiliate1.com/postback?lead_id=1&status=ping_accepted&payout=25.00&campaign=1', 'GET', 200, 1, 150),
+  (1, 1, 'post_successful', 'https://affiliate1.com/postback?lead_id=1&status=post_successful&payout=25.00&campaign=1', 'GET', 200, 1, 120),
+  (2, 2, 'post_successful', 'https://affiliate1.com/postback?lead_id=2&status=post_successful&value=25.00', 'GET', 200, 1, 180),
+  (4, 5, 'ping_accepted', 'https://affiliate3.com/track?id=550e8400-e29b-41d4-a716-446655440005&event=ping_accepted&amount=27.50', 'GET', 404, 0, 5000);
