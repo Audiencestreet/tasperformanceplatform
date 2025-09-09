@@ -1238,6 +1238,211 @@ app.post('/pixel/conversion', async (c) => {
   }
 });
 
+// Postback URL Management API Routes
+
+// Create new postback URL
+app.post('/api/postbacks', async (c) => {
+  try {
+    // Check if database is available
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
+    const postbackData = await c.req.json();
+    const postbackService = new PostbackService(c.env.DB);
+    
+    // Validate required fields
+    const requiredFields = ['affiliate_id', 'name', 'url_template', 'trigger_events'];
+    for (const field of requiredFields) {
+      if (!postbackData[field]) {
+        return c.json<ApiResponse>({ 
+          success: false, 
+          error: `Missing required field: ${field}` 
+        }, 400);
+      }
+    }
+    
+    // Set defaults
+    if (!postbackData.http_method) postbackData.http_method = 'GET';
+    if (!postbackData.status) postbackData.status = 'active';
+    
+    const postbackUrl = await postbackService.createPostbackUrl(postbackData);
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: postbackUrl,
+      message: 'Postback URL created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating postback URL:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to create postback URL' 
+    }, 500);
+  }
+});
+
+// Get postback URLs for affiliate
+app.get('/api/postbacks', async (c) => {
+  try {
+    // Check if database is available
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
+    const affiliateId = c.req.query('affiliate_id');
+    const campaignId = c.req.query('campaign_id');
+    
+    if (!affiliateId) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'affiliate_id parameter is required' 
+      }, 400);
+    }
+    
+    const postbackService = new PostbackService(c.env.DB);
+    const postbackUrls = await postbackService.getPostbackUrls(
+      parseInt(affiliateId),
+      campaignId ? parseInt(campaignId) : undefined
+    );
+    
+    return c.json<ApiResponse>({ success: true, data: postbackUrls });
+  } catch (error) {
+    console.error('Error getting postback URLs:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to get postback URLs' 
+    }, 500);
+  }
+});
+
+// Update postback URL
+app.put('/api/postbacks/:id', async (c) => {
+  try {
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
+    const postbackId = parseInt(c.req.param('id'));
+    const updates = await c.req.json();
+    
+    const db = new Database(c.env.DB);
+    
+    // Update postback URL
+    const result = await db.db.prepare(`
+      UPDATE postback_urls 
+      SET name = ?, url_template = ?, trigger_events = ?, http_method = ?, 
+          headers = ?, payload_template = ?, status = ?, updated_at = ?
+      WHERE id = ?
+      RETURNING *
+    `).bind(
+      updates.name,
+      updates.url_template,
+      JSON.stringify(updates.trigger_events),
+      updates.http_method,
+      updates.headers ? JSON.stringify(updates.headers) : null,
+      updates.payload_template || null,
+      updates.status,
+      new Date().toISOString(),
+      postbackId
+    ).first();
+    
+    if (!result) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Postback URL not found' 
+      }, 404);
+    }
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: result,
+      message: 'Postback URL updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating postback URL:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to update postback URL' 
+    }, 500);
+  }
+});
+
+// Delete postback URL
+app.delete('/api/postbacks/:id', async (c) => {
+  try {
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
+    const postbackId = parseInt(c.req.param('id'));
+    const db = new Database(c.env.DB);
+    
+    const result = await db.db.prepare('DELETE FROM postback_urls WHERE id = ?').bind(postbackId).run();
+    
+    if (result.changes === 0) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Postback URL not found' 
+      }, 404);
+    }
+    
+    return c.json<ApiResponse>({
+      success: true,
+      message: 'Postback URL deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting postback URL:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to delete postback URL' 
+    }, 500);
+  }
+});
+
+// Get postback logs
+app.get('/api/postbacks/logs', async (c) => {
+  try {
+    if (!c.env?.DB) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'Database not configured. Please contact administrator.' 
+      }, 503);
+    }
+    
+    const affiliateId = c.req.query('affiliate_id');
+    const campaignId = c.req.query('campaign_id');
+    const limit = parseInt(c.req.query('limit') || '50');
+    
+    const postbackService = new PostbackService(c.env.DB);
+    const logs = await postbackService.getPostbackLogs(
+      affiliateId ? parseInt(affiliateId) : undefined,
+      campaignId ? parseInt(campaignId) : undefined,
+      limit
+    );
+    
+    return c.json<ApiResponse>({ success: true, data: logs });
+  } catch (error) {
+    console.error('Error getting postback logs:', error);
+    return c.json<ApiResponse>({ 
+      success: false, 
+      error: 'Failed to get postback logs' 
+    }, 500);
+  }
+});
+
 // Main dashboard page
 app.get('/', (c) => {
   return c.html(`
@@ -1549,8 +1754,8 @@ app.get('/affiliates', (c) => {
                         <a href="/campaigns" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
                             <i class="fas fa-bullhorn mr-2"></i>Campaigns
                         </a>
-                        <a href="/px-test" class="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700">
-                            <i class="fas fa-vial mr-2"></i>PX Test
+                        <a href="/postbacks" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700">
+                            <i class="fas fa-webhook mr-2"></i>Postbacks
                         </a>
                     </div>
                 </div>
@@ -1577,61 +1782,12 @@ app.get('/affiliates', (c) => {
             </div>
         </div>
         
-        <!-- Create/Edit Affiliate Modal -->
-        <div id="affiliate-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-4">
-            <div class="bg-white rounded-lg max-w-md w-full p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 id="modal-title" class="text-lg font-semibold text-gray-900">New Affiliate</h3>
-                    <button id="close-modal" class="text-gray-400 hover:text-gray-600">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                
-                <form id="affiliate-form" class="space-y-4">
-                    <input type="hidden" id="affiliate-id" name="id">
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                        <input type="text" name="name" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                        <input type="email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                        <input type="text" name="api_key" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Auto-generated if left empty">
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                        <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="active">Active</option>
-                            <option value="suspended">Suspended</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
-                    </div>
-                    
-                    <div class="flex justify-end space-x-2 pt-4">
-                        <button type="button" id="cancel-affiliate" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">
-                            Cancel
-                        </button>
-                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                            Save Affiliate
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        
         <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
         <script src="/static/affiliates.js"></script>
     </body>
     </html>
   `)
-})
+});
 
 // Conversions analytics page
 app.get('/conversions', (c) => {
