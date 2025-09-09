@@ -2,11 +2,14 @@
 // Based on PX Direct Post specification for Health and Solar verticals
 
 export interface PXDirectPostRequest {
-  // Contact Information
+  // Required API Token
+  ApiToken: string;
+  
+  // Contact Information (exact PX field names)
   FirstName: string;
   LastName: string;
-  Email: string;
-  Phone: string;
+  EmailAddress: string;  // PX uses EmailAddress, not Email
+  PhoneNumber: string;   // PX uses PhoneNumber, not Phone
   
   // Address Information
   Address?: string;
@@ -14,14 +17,15 @@ export interface PXDirectPostRequest {
   State?: string;
   ZipCode: string;
   
-  // Lead Context
+  // Lead Context (required by PX)
   Vertical: 'Health' | 'Solar' | 'Home';
-  SessionLength?: number; // in seconds
-  TcpaText?: string;
-  
-  // Tracking Information
   SubId: string;
   Source?: string;
+  OriginalUrl?: string;  // PX expects this field
+  
+  // Session Information
+  SessionLength?: number; // in seconds
+  TcpaText?: string;
   ClickId?: string;
   IpAddress?: string;
   UserAgent?: string;
@@ -104,13 +108,13 @@ export class PXAPIClient {
       // Use provided token or default based on vertical
       const apiToken = token || this.getDefaultToken(vertical, env);
       
-      // Build the payload
+      // Build the payload using exact PX field names
       const payload: PXDirectPostRequest = {
-        // Contact Information
+        // Contact Information (exact PX field names)
         FirstName: contact.firstName,
         LastName: contact.lastName,
-        Email: contact.email,
-        Phone: contact.phone,
+        EmailAddress: contact.email,  // PX uses EmailAddress, not Email
+        PhoneNumber: contact.phone,   // PX uses PhoneNumber, not Phone
         ZipCode: contact.zipCode,
         
         // Optional Address Information
@@ -128,25 +132,39 @@ export class PXAPIClient {
         ...(context.ipAddress && { IpAddress: context.ipAddress }),
         ...(context.userAgent && { UserAgent: context.userAgent }),
         
+        // Add OriginalUrl if not present (PX seems to expect this)
+        OriginalUrl: context.clickId ? `https://example.com/landing?id=${context.clickId}` : 'https://example.com/solar',
+        
         // Include any extra fields
         ...extras
       };
       
-      console.log('Sending Direct Post request to PX:', JSON.stringify(payload, null, 2));
-      
-      // Add API token to payload instead of using Authorization header
+      // Add API token to payload
       const payloadWithToken = {
         ApiToken: apiToken,
         ...payload
       };
       
+      console.log('=== PX DIRECT POST DEBUG ===');
+      console.log('URL:', this.DIRECT_POST_URL);
+      console.log('API Token:', apiToken.substring(0, 8) + '...');
+      console.log('Headers:', { 'Content-Type': 'application/json', 'Accept': 'application/json' });
+      console.log('Payload size:', JSON.stringify(payloadWithToken).length, 'bytes');
+      console.log('Full payload:', JSON.stringify(payloadWithToken, null, 2));
+      console.log('Raw JSON (first 300 chars):', JSON.stringify(payloadWithToken).substring(0, 300));
+      
+      // Convert payload to XML format (PX API expects XML, not JSON!)
+      const xmlPayload = this.buildXmlPayload(payloadWithToken);
+      
+      console.log('XML Payload:', xmlPayload);
+      
       const response = await fetch(this.DIRECT_POST_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml'
         },
-        body: JSON.stringify(payloadWithToken)
+        body: xmlPayload
       });
       
       const responseText = await response.text();
@@ -166,13 +184,14 @@ export class PXAPIClient {
       
       let directPostResponse: PXDirectPostResponse;
       try {
-        directPostResponse = JSON.parse(responseText);
+        // Parse XML response to JSON
+        directPostResponse = this.parseXmlResponse(responseText);
       } catch (e) {
         return {
           response: null,
           error: {
             code: 'PARSE_ERROR',
-            message: 'Failed to parse PX response',
+            message: 'Failed to parse PX XML response',
             details: responseText
           }
         };
@@ -191,6 +210,135 @@ export class PXAPIClient {
         }
       };
     }
+  }
+  
+  /**
+   * Parse XML response from PX API to JSON format
+   */
+  private static parseXmlResponse(xmlText: string): PXDirectPostResponse {
+    // Simple XML parsing for PX response structure
+    const success = /<Success>(.*?)<\/Success>/.exec(xmlText)?.[1] === 'true';
+    const message = /<Message>(.*?)<\/Message>/.exec(xmlText)?.[1] || '';
+    const leadId = /<LeadId.*?>(.*?)<\/LeadId>/.exec(xmlText)?.[1] || undefined;
+    const payout = /<Payout.*?>(.*?)<\/Payout>/.exec(xmlText)?.[1];
+    const buyerName = /<BuyerName.*?>(.*?)<\/BuyerName>/.exec(xmlText)?.[1] || undefined;
+    
+    // Extract errors
+    const errors: string[] = [];
+    const errorMatches = xmlText.match(/<string>(.*?)<\/string>/g);
+    if (errorMatches) {
+      errorMatches.forEach(match => {
+        const error = /<string>(.*?)<\/string>/.exec(match)?.[1];
+        if (error) errors.push(error);
+      });
+    }
+    
+    return {
+      Success: success,
+      Message: message,
+      LeadId: leadId,
+      Price: payout ? parseFloat(payout) : undefined,
+      BuyerName: buyerName,
+      Errors: errors.length > 0 ? errors : undefined
+    };
+  }
+  
+  /**
+   * Build XML payload for PX Direct Post API
+   */
+  private static buildXmlPayload(payload: any): string {
+    // Helper to escape XML content
+    const escapeXml = (str: string | undefined): string => {
+      if (!str) return '';
+      return str.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    };
+    
+    // Convert state to valid US state code
+    const getValidState = (state: string): string => {
+      const stateMap: Record<string, string> = {
+        'TS': 'TX', 'Hyderabad': 'CA', 'India': 'CA'
+      };
+      return stateMap[state] || (state && state.length === 2 ? state : 'CA');
+    };
+    
+    // Build Contact Data section
+    const contactData = `
+      <ContactData>
+        <FirstName>${escapeXml(payload.FirstName)}</FirstName>
+        <LastName>${escapeXml(payload.LastName)}</LastName>
+        <EmailAddress>${escapeXml(payload.EmailAddress)}</EmailAddress>
+        <PhoneNumber>${escapeXml(payload.PhoneNumber)}</PhoneNumber>
+        <Address>${escapeXml(payload.Address || '123 Main St')}</Address>
+        <City>${escapeXml(payload.City || 'Los Angeles')}</City>
+        <State>${getValidState(payload.State)}</State>
+        <ZipCode>${escapeXml(payload.ZipCode)}</ZipCode>
+        <Ownership>${escapeXml(payload.Ownership || 'Own')}</Ownership>
+        <Roofshade>${escapeXml(this.mapRoofShade(payload.Roofshade))}</Roofshade>
+        <ElectricityBill>${escapeXml(this.mapElectricityBill(payload.ElectricityBill))}</ElectricityBill>
+      </ContactData>`;
+    
+    // Build Solar-specific fields (all required for Solar vertical)
+    const solarFields = payload.Vertical === 'Solar' ? `
+  <AuthorizedForPropertyChanges>${payload.AuthorizedForPropertyChanges || 'Yes'}</AuthorizedForPropertyChanges>
+  <CurrentUtilityProvider>${payload.CurrentUtilityProvider || 'Pacific Gas & Electric'}</CurrentUtilityProvider>
+  <ProjectStatus>${payload.ProjectStatus || 'Existing home'}</ProjectStatus>
+  <PropertyStories>${payload.PropertyStories || 'Two stories'}</PropertyStories>
+  <PropertyUsage>${payload.PropertyUsage || 'Residential'}</PropertyUsage>
+  <SolarSystemType>${payload.SolarSystemType || 'Solar electricity'}</SolarSystemType>
+  <SolarInstallationLocation>${payload.SolarInstallationLocation || 'Roof'}</SolarInstallationLocation>` : '';
+    
+    // Build Home section
+    const homeSection = `
+      <Home>
+        <Ownership>${escapeXml(payload.Ownership || 'Own')}</Ownership>
+      </Home>`;
+    
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Lead>
+  <ApiToken>${escapeXml(payload.ApiToken)}</ApiToken>
+  <Vertical>${escapeXml(payload.Vertical)}</Vertical>
+  <SubId>${escapeXml(payload.SubId)}</SubId>
+  <Source>${escapeXml(payload.Source || 'Direct')}</Source>
+  <JornayaLeadId>${escapeXml(payload.JornayaLeadId || 'PX_' + Date.now())}</JornayaLeadId>
+  <SessionLength>${payload.SessionLength || 180}</SessionLength>
+  <TcpaText>${escapeXml(payload.TcpaText || 'I agree to be contacted.')}</TcpaText>
+  <OriginalUrl>${escapeXml(payload.OriginalUrl || 'https://example.com')}</OriginalUrl>
+  <IpAddress>${escapeXml(payload.IpAddress || '203.0.113.10')}</IpAddress>
+  <UserAgent>${escapeXml(payload.UserAgent || 'Mozilla/5.0')}</UserAgent>
+  ${contactData}
+  ${solarFields}
+  ${homeSection}
+</Lead>`;
+  }
+  
+  /**
+   * Map roof shade values to PX accepted values
+   */
+  private static mapRoofShade(roofshade?: string): string {
+    const mapping: Record<string, string> = {
+      'No Shade': 'Full sun',
+      'Little Shade': 'Partial sun', 
+      'Moderate Shade': 'Mostly shaded',
+      'Heavy Shade': 'Mostly shaded'
+    };
+    return mapping[roofshade || ''] || 'Full sun';
+  }
+  
+  /**
+   * Map electricity bill values to PX accepted values
+   */
+  private static mapElectricityBill(bill?: string): string {
+    const mapping: Record<string, string> = {
+      '$100-150': '$101-125',
+      '$150-200': '$151-175',
+      '$200+': '$201-300'
+    };
+    return mapping[bill || ''] || '$101-125';
   }
   
   /**

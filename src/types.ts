@@ -7,13 +7,16 @@ export interface Bindings {
   PX_API_TOKEN_SOLAR?: string;
 }
 
-// PX API Direct Post Types
+// PX API Direct Post Types (exact field names as expected by PX)
 export interface PXDirectPostRequest {
-  // Contact Information
+  // Required API Token
+  ApiToken: string;
+  
+  // Contact Information (exact PX field names)
   FirstName: string;
   LastName: string;
-  Email: string;
-  Phone: string;
+  EmailAddress: string;  // PX uses EmailAddress, not Email
+  PhoneNumber: string;   // PX uses PhoneNumber, not Phone
   
   // Address Information
   Address?: string;
@@ -21,14 +24,15 @@ export interface PXDirectPostRequest {
   State?: string;
   ZipCode: string;
   
-  // Lead Context
+  // Lead Context (required by PX)
   Vertical: 'Health' | 'Solar' | 'Home';
-  SessionLength?: number; // in seconds
-  TcpaText?: string;
-  
-  // Tracking Information
   SubId: string;
   Source?: string;
+  OriginalUrl?: string;  // PX expects this field
+  
+  // Session Information
+  SessionLength?: number; // in seconds
+  TcpaText?: string;
   ClickId?: string;
   IpAddress?: string;
   UserAgent?: string;
