@@ -612,6 +612,51 @@ app.put('/api/affiliates/:id', async (c) => {
   }
 });
 
+// Get affiliate postbacks
+app.get('/api/affiliates/:id/postbacks', async (c) => {
+  try {
+    const affiliateId = parseInt(c.req.param('id'));
+    const postbackService = new PostbackService(c.env.DB);
+    
+    const postbacks = await postbackService.getPostbackUrls(affiliateId);
+    
+    return c.json<ApiResponse>({ success: true, data: postbacks });
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to get affiliate postbacks' }, 500);
+  }
+});
+
+// Create postback URL
+app.post('/api/postbacks', async (c) => {
+  try {
+    const postbackData = await c.req.json();
+    const postbackService = new PostbackService(c.env.DB);
+    
+    // Validate required fields
+    if (!postbackData.affiliate_id || !postbackData.name || !postbackData.url_template) {
+      return c.json<ApiResponse>({ 
+        success: false, 
+        error: 'affiliate_id, name, and url_template are required' 
+      }, 400);
+    }
+    
+    // Set defaults
+    postbackData.http_method = postbackData.http_method || 'GET';
+    postbackData.status = postbackData.status || 'active';
+    
+    const postback = await postbackService.createPostbackUrl(postbackData);
+    
+    return c.json<ApiResponse>({
+      success: true,
+      data: postback,
+      message: 'Postback created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating postback:', error);
+    return c.json<ApiResponse>({ success: false, error: 'Failed to create postback' }, 500);
+  }
+});
+
 // Create new campaign
 app.post('/api/campaigns', async (c) => {
   try {
@@ -1481,11 +1526,11 @@ app.get('/affiliates', (c) => {
                         <h1 class="text-2xl font-bold text-gray-900">Affiliate Management</h1>
                     </div>
                     <div class="flex space-x-2">
-                        <button id="create-affiliate-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
-                            <i class="fas fa-plus mr-2"></i>New Affiliate
-                        </button>
                         <a href="/campaigns" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
                             <i class="fas fa-bullhorn mr-2"></i>Campaigns
+                        </a>
+                        <a href="/px-test" class="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700">
+                            <i class="fas fa-vial mr-2"></i>PX Test
                         </a>
                     </div>
                 </div>
@@ -1495,8 +1540,12 @@ app.get('/affiliates', (c) => {
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <!-- Affiliates List -->
             <div class="bg-white rounded-lg shadow">
-                <div class="px-6 py-4 border-b border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h2 class="text-lg font-semibold text-gray-900">All Affiliates</h2>
+                    <button onclick="affiliateManager.showCreateAffiliateModal()" 
+                            class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center">
+                        <i class="fas fa-plus mr-2"></i>Create Affiliate
+                    </button>
                 </div>
                 
                 <div id="affiliates-list" class="p-6">
