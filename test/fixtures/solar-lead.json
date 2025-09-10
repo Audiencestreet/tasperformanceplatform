@@ -1,0 +1,27 @@
+{
+  "vertical": "Solar",
+  "subId": "AF01", 
+  "source": "Test Campaign",
+  "contact": {
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+15551234567",
+    "zipCode": "90210",
+    "address": "123 Main Street",
+    "city": "Beverly Hills", 
+    "state": "CA"
+  },
+  "context": {
+    "sessionLength": 180,
+    "tcpaText": "I agree to be contacted about this solar offer and understand that consent is not required for purchase.",
+    "clickId": "solar_test_click_123",
+    "ipAddress": "192.168.1.100",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  },
+  "extras": {
+    "Ownership": "Own",
+    "Roofshade": "No Shade", 
+    "ElectricityBill": "$150-200"
+  }
+}

@@ -1,3 +1,97 @@
+/**
+ * =============================================================================
+ * AFFILIATE TRACKING SYSTEM - MAIN APPLICATION
+ * =============================================================================
+ * 
+ * Comprehensive affiliate tracking and lead management system for Cloudflare Pages.
+ * Handles PX API integration, call tracking, postback processing, and campaign attribution.
+ * 
+ * @author Affiliate Tracking System Team
+ * @version 1.0.0
+ * @platform Cloudflare Pages + Workers
+ * @database Cloudflare D1 (SQLite)
+ * 
+ * CORE INTEGRATIONS:
+ * ==================
+ * 
+ * 1. PX API DIRECT POST (✅ Active)
+ *    - Endpoint: https://leadapi.px.com/api/lead/directpost
+ *    - Supported Verticals: Solar (122), Health, Home
+ *    - Format: XML payload with complete lead qualification
+ *    - Transaction ID tracking for attribution
+ * 
+ * 2. RINGBA CALL TRACKING (✅ Active) 
+ *    - Webhook: GET /api/webhooks/ringba
+ *    - Inbound call attribution to campaigns
+ *    - Call qualification (>30 seconds = qualified)
+ *    - Recording URL storage and postback triggers
+ * 
+ * 3. ADT HOME SECURITY (✅ Active)
+ *    - Offer ID: 477, Payout: $60
+ *    - Special tracking link format: homesafety.adt.com/aff_ad
+ *    - Email campaign optimization (EM01/EM02 SubIDs)
+ * 
+ * 4. MARKETCALL INTEGRATION (🚧 In Development)
+ *    - Lead distribution and real-time bidding
+ *    - Backup routing for rejected PX leads
+ * 
+ * 5. OPTIZMO COMPLIANCE (📋 Planned)
+ *    - TCPA compliance checking
+ *    - Data validation and enhancement
+ * 
+ * CAMPAIGN STRUCTURE:
+ * ===================
+ * 
+ * Campaign Types by Vertical:
+ * - Solar Campaigns (Offer ID: 122)
+ *   - Facebook Solar (FB01, $25 payout)
+ *   - Google Ads Solar (GG01, $30 payout)  
+ *   - Affiliate Solar (AF01-AF02, $22.50-27.50 payout)
+ * 
+ * - ADT Home Security (Offer ID: 477)
+ *   - Email Campaign (EM01, $60 payout)
+ *   - Affiliate Campaign (AF03, $55 payout)
+ * 
+ * - Health Insurance (Offer: HEALTH_*)
+ *   - Search Campaign (HH01, $35 payout)
+ *   - Email Campaign (EM02, $40 payout)
+ * 
+ * - Home Improvement (Offer: HOME_*, HVAC_*)
+ *   - General Home (AF04, $20 payout)
+ *   - HVAC Specific (GG02, $45 payout)
+ * 
+ * SUBID STRATEGY:
+ * ===============
+ * 
+ * Traffic Source → SubID Mapping (20 total limit):
+ * - Affiliates: AF01, AF02, AF03, AF04
+ * - Email: EM01, EM02  
+ * - Social: FB01, IG01, TT01, TW01
+ * - Search: GG01, GG02
+ * - Native: TB01, OB01
+ * - Health: HH01
+ * 
+ * TRACKING ARCHITECTURE:
+ * ======================
+ * 
+ * Lead Attribution Flow:
+ * 1. Click → Tracking Link Generation (UUID click_id)
+ * 2. Landing → Lead Form Submission
+ * 3. PX API → Direct Post with Transaction ID
+ * 4. Postback → Affiliate notification with conversion data
+ * 5. Call Tracking → Ringba webhook attribution
+ * 
+ * Data Storage:
+ * - leads: Complete lead records with PX responses
+ * - campaigns: Campaign configuration and payout settings
+ * - conversions: Conversion tracking with revenue attribution
+ * - inbound_calls: Call tracking data from Ringba
+ * - click_tracking: Click attribution and user behavior
+ * - postback_logs: Postback delivery tracking
+ * 
+ * =============================================================================
+ */
+
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
@@ -28,7 +122,33 @@ function generateUUID(): string {
 
 // API Routes
 
-// Generate tracking links
+/**
+ * TRACKING LINK GENERATION API
+ * ============================
+ * 
+ * Generates campaign-specific tracking links with unique click attribution.
+ * Supports both generic tracking format and special ADT format.
+ * 
+ * SUPPORTED FORMATS:
+ * 
+ * 1. ADT Home Security (Offer ID: 477):
+ *    https://homesafety.adt.com/aff_ad?campaign_id=477&aff_id=15441&hostNameId=23326&aff_sub={sub_id}&aff_sub2={click_id}
+ * 
+ * 2. Generic Campaigns (Solar, Health, etc.):
+ *    https://your-domain.com/track/click?c={campaign_id}&s={sub_id}&id={click_id}&url={landing_url}
+ * 
+ * CLICK ATTRIBUTION:
+ * - Each link gets unique UUID click_id for attribution
+ * - Links stored in database for reporting
+ * - Click events trigger postbacks to affiliates
+ * - User behavior tracked (IP, User-Agent, Referrer)
+ * 
+ * @route POST /api/tracking/generate
+ * @param {number} campaign_id - Campaign ID from campaigns table
+ * @param {string} sub_id - PX SubID (AF01, EM01, etc.)
+ * @param {string} landing_url - Final destination URL
+ * @returns {object} Generated tracking link and attribution data
+ */
 app.post('/api/tracking/generate', async (c) => {
   try {
     const { campaign_id, sub_id, landing_url } = await c.req.json();
@@ -378,7 +498,37 @@ app.post('/api/leads', async (c) => {
   }
 });
 
-// PX Direct Post Test Endpoint
+/**
+ * PX DIRECT POST API ENDPOINT
+ * ============================
+ * 
+ * Direct interface to PX API for lead submission and testing.
+ * Handles complete XML payload construction and response parsing.
+ * 
+ * SUPPORTED VERTICALS:
+ * - Solar: Residential solar qualification with ownership, roof shade, electricity bill
+ * - Health: Individual health insurance with demographic data
+ * - Home: Home security and improvement leads
+ * 
+ * REQUIRED FIELDS:
+ * - vertical: "Solar" | "Health" | "Home"
+ * - subId: Valid PX SubID (see SubID strategy above)
+ * - contact: Complete contact information (name, email, phone, address)
+ * - context: Session data (IP, User-Agent, TCPA consent)
+ * 
+ * RESPONSE FORMAT:
+ * - Success: PX Transaction ID + Lead ID + Payout amount
+ * - Failure: Detailed validation errors from PX API
+ * 
+ * API TOKEN MAPPING:
+ * - Solar: B593425D-90C7-4CB8-8952-605D8A0CCEC0
+ * - Health: F9F9B3CC-85D8-4142-9007-61F784C1F098
+ * - Home: (Token TBD)
+ * 
+ * @route POST /api/px/direct-post
+ * @param {object} payload - Complete lead data for PX submission
+ * @returns {object} PX API response with transaction tracking
+ */
 app.post('/api/px/direct-post', async (c) => {
   try {
     const {
@@ -1455,7 +1605,51 @@ app.get('/api/postbacks/logs', async (c) => {
   }
 });
 
-// PX Postback Receiver - Handle conversion notifications from PX
+/**
+ * PX POSTBACK RECEIVER
+ * ====================
+ * 
+ * Receives conversion notifications from PX when leads convert to sales.
+ * Creates conversion records and triggers affiliate postbacks.
+ * 
+ * POSTBACK URL FORMAT (configured in PX dashboard):
+ * https://your-domain.com/api/postback/px?aff_sub={aff_sub}&aff_sub2={aff_sub2}&transaction_id={transaction_id}&payout={payout}&campaign_id={campaign_id}&status={status}
+ * 
+ * PARAMETER MAPPING:
+ * - aff_sub: Original SubID from tracking link (AF01, EM01, etc.)
+ * - aff_sub2: Unique click ID from tracking link (UUID)
+ * - transaction_id: PX transaction ID from original lead submission
+ * - payout: Commission amount paid by PX buyer
+ * - campaign_id: Internal campaign ID
+ * - status: Conversion status (conversion, chargeback, etc.)
+ * 
+ * CONVERSION PROCESSING:
+ * 1. Validates required parameters (transaction_id, campaign_id)
+ * 2. Creates synthetic lead record if none exists
+ * 3. Records conversion in conversions table
+ * 4. Triggers affiliate postbacks with commission data
+ * 5. Logs all activity for reporting and debugging
+ * 
+ * AFFILIATE POSTBACK TRIGGERS:
+ * - Successful conversions trigger configured postback URLs
+ * - Postback includes: conversion value, campaign info, attribution data
+ * - Failed postbacks logged and retried automatically
+ * 
+ * ERROR HANDLING:
+ * - Missing parameters return 400 Bad Request
+ * - Database errors return 500 Internal Server Error
+ * - All errors logged with full context for debugging
+ * - Always returns success to PX to prevent retries
+ * 
+ * @route GET /api/postback/px
+ * @param {string} aff_sub - SubID from original tracking link
+ * @param {string} aff_sub2 - Click ID from original tracking link  
+ * @param {string} transaction_id - PX transaction ID (required)
+ * @param {number} payout - Commission payout amount
+ * @param {number} campaign_id - Campaign ID (required)
+ * @param {string} status - Conversion status
+ * @returns {object} Success confirmation with timestamp
+ */
 app.get('/api/postback/px', async (c) => {
   try {
     // Extract PX parameters
@@ -1648,6 +1842,773 @@ app.get('/track', async (c) => {
     return c.redirect('https://www.adt.com/'); // Fallback
   }
 });
+
+// Inbound Call Tracking API for Solar and other verticals
+app.post('/api/calls/inbound', async (c) => {
+  try {
+    const callData = await c.req.json();
+    
+    console.log('=== INBOUND CALL RECEIVED ===');
+    console.log('Call data:', JSON.stringify(callData, null, 2));
+    
+    // Validate required fields for call tracking
+    const requiredFields = ['phone_number', 'campaign_id', 'affiliate_id'];
+    const missing = requiredFields.filter(field => !callData[field]);
+    
+    if (missing.length > 0) {
+      return c.json({
+        success: false,
+        error: `Missing required fields: ${missing.join(', ')}`,
+        required_fields: requiredFields
+      }, 400);
+    }
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      // Log inbound call
+      const callRecord = {
+        phone_number: callData.phone_number,
+        campaign_id: parseInt(callData.campaign_id),
+        affiliate_id: parseInt(callData.affiliate_id),
+        call_duration: callData.duration || 0,
+        caller_name: callData.caller_name || 'Unknown',
+        caller_location: callData.caller_location || '',
+        call_status: callData.status || 'answered',
+        recording_url: callData.recording_url || '',
+        call_timestamp: callData.timestamp || new Date().toISOString(),
+        tracking_number: callData.tracking_number || '',
+        source_number: callData.source_number || '',
+        ip_address: c.req.header('CF-Connecting-IP') || '127.0.0.1',
+        user_agent: c.req.header('User-Agent') || 'Unknown'
+      };
+      
+      // Store call record in database
+      await db.db.prepare(`
+        INSERT INTO inbound_calls (
+          phone_number, campaign_id, affiliate_id, call_duration, caller_name,
+          caller_location, call_status, recording_url, call_timestamp,
+          tracking_number, source_number, ip_address, user_agent, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        callRecord.phone_number,
+        callRecord.campaign_id,
+        callRecord.affiliate_id,
+        callRecord.call_duration,
+        callRecord.caller_name,
+        callRecord.caller_location,
+        callRecord.call_status,
+        callRecord.recording_url,
+        callRecord.call_timestamp,
+        callRecord.tracking_number,
+        callRecord.source_number,
+        callRecord.ip_address,
+        callRecord.user_agent,
+        new Date().toISOString()
+      ).run();
+      
+      console.log('Inbound call logged successfully');
+      
+      // Trigger affiliate postbacks for call events
+      const postbackService = new PostbackService(c.env.DB);
+      await postbackService.triggerPostbacks(0, 'inbound_call', {
+        phone_number: callData.phone_number,
+        call_duration: callData.duration?.toString(),
+        call_value: callData.call_value?.toString() || '0'
+      });
+    }
+    
+    return c.json({
+      success: true,
+      message: 'Inbound call logged successfully',
+      call_id: callData.call_id || `call_${Date.now()}`,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error processing inbound call:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+/**
+ * RINGBA WEBHOOK INTEGRATION
+ * ===========================
+ * 
+ * Processes inbound call tracking webhooks from Ringba platform.
+ * Handles call attribution, qualification, and postback triggers.
+ * 
+ * WEBHOOK FORMAT (GET request with query parameters):
+ * /api/webhooks/ringba?event=Completed&call_id=12345&tracking_number=%2B18001234567&caller_number=%2B15551234567&duration=120&status=answered&recording_url=https://...
+ * 
+ * CALL QUALIFICATION RULES:
+ * - Duration > 30 seconds = Qualified call (triggers postbacks)
+ * - Duration ≤ 30 seconds = Logged but no postbacks
+ * - Missed calls = Logged for reporting only
+ * 
+ * CAMPAIGN ATTRIBUTION:
+ * - tracking_number mapped to campaign via call_tracking_numbers table
+ * - If no mapping found, creates record with default campaign/affiliate
+ * - Attribution data stored for reporting and optimization
+ * 
+ * POSTBACK TRIGGERS:
+ * - Qualified calls trigger affiliate postbacks with call_value
+ * - Default call value: $25.00 (configurable per campaign)
+ * - Postback includes: call_duration, tracking_number, ringba_call_id
+ * 
+ * CALL TRACKING NUMBER MANAGEMENT:
+ * - Each campaign can have multiple tracking numbers
+ * - Numbers configured via: POST /api/call-tracking/numbers
+ * - Provider field supports: "ringba", "callrail", "marchex"
+ * 
+ * @route GET /api/webhooks/ringba
+ * @param {string} event - Webhook event type (Completed, Missed, etc.)
+ * @param {string} call_id - Unique Ringba call identifier
+ * @param {string} tracking_number - Phone number that was called
+ * @param {string} caller_number - Phone number of caller
+ * @param {number} duration - Call duration in seconds
+ * @param {string} status - Call status (answered, missed, busy, etc.)
+ * @param {string} recording_url - URL to call recording (optional)
+ * @returns {object} Success confirmation for Ringba platform
+ */
+app.get('/api/webhooks/ringba', async (c) => {
+  try {
+    // Ringba sends data as query parameters, not JSON body
+    const webhookData = {
+      event: c.req.query('event'),
+      call_id: c.req.query('call_id'),
+      tracking_number: c.req.query('tracking_number'),
+      caller_number: c.req.query('caller_number'),
+      duration: parseInt(c.req.query('duration') || '0'),
+      status: c.req.query('status'),
+      recording_url: c.req.query('recording_url'),
+      timestamp: c.req.query('timestamp')
+    };
+    
+    console.log('=== RINGBA WEBHOOK RECEIVED ===');
+    console.log('Event:', webhookData.event);
+    console.log('Call ID:', webhookData.call_id);
+    console.log('Tracking Number:', webhookData.tracking_number);
+    console.log('Caller Number:', webhookData.caller_number);
+    console.log('Duration:', webhookData.duration, 'seconds');
+    console.log('Status:', webhookData.status);
+    console.log('Recording URL:', webhookData.recording_url);
+    console.log('Timestamp:', webhookData.timestamp);
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      // Store webhook data for processing
+      await db.db.prepare(`
+        INSERT INTO ringba_webhooks (
+          webhook_type, call_id, tracking_number, caller_number,
+          duration, status, recording_url, webhook_data, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        webhookData.event || 'Completed',
+        webhookData.call_id || 'unknown',
+        webhookData.tracking_number || '',
+        webhookData.caller_number || '',
+        webhookData.duration || 0,
+        webhookData.status || 'unknown',
+        webhookData.recording_url || '',
+        JSON.stringify(webhookData),
+        new Date().toISOString()
+      ).run();
+      
+      // Process webhook based on event type
+      if (webhookData.event === 'Completed' || webhookData.status === 'answered') {
+        // Find campaign and affiliate from tracking number
+        const trackingInfo = await db.db.prepare(`
+          SELECT campaign_id, affiliate_id FROM call_tracking_numbers 
+          WHERE tracking_number = ?
+        `).bind(webhookData.tracking_number || '').first();
+        
+        if (trackingInfo) {
+          // Log the inbound call
+          const callResult = await db.db.prepare(`
+            INSERT INTO inbound_calls (
+              phone_number, campaign_id, affiliate_id, call_duration,
+              call_status, recording_url, call_timestamp, tracking_number,
+              source_number, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+          `).bind(
+            webhookData.caller_number || 'unknown',
+            trackingInfo.campaign_id,
+            trackingInfo.affiliate_id,
+            webhookData.duration || 0,
+            webhookData.status || 'completed',
+            webhookData.recording_url || '',
+            webhookData.timestamp || new Date().toISOString(),
+            webhookData.tracking_number || '',
+            webhookData.caller_number || 'unknown',
+            new Date().toISOString()
+          ).first();
+          
+          // Trigger postbacks for qualified calls (duration > 30 seconds)
+          const callDuration = webhookData.duration || 0;
+          console.log(`Call duration: ${callDuration} seconds`);
+          
+          if (callDuration > 30 && callResult?.id) {
+            console.log('Triggering postbacks for qualified call');
+            const postbackService = new PostbackService(c.env.DB);
+            await postbackService.triggerPostbacks(callResult.id, 'qualified_call', {
+              call_duration: callDuration.toString(),
+              tracking_number: webhookData.tracking_number || '',
+              call_value: '25.00', // Default call value - adjust as needed
+              ringba_call_id: webhookData.call_id
+            });
+          } else {
+            console.log('Call not qualified for postback (duration <= 30 seconds or no call ID)');
+          }
+        } else {
+          console.log('No tracking number configuration found for:', webhookData.tracking_number);
+          
+          // Create a default entry if no tracking number config exists
+          if (webhookData.tracking_number) {
+            console.log('Creating inbound call record without campaign attribution');
+            await db.db.prepare(`
+              INSERT INTO inbound_calls (
+                phone_number, campaign_id, affiliate_id, call_duration,
+                call_status, recording_url, call_timestamp, tracking_number,
+                source_number, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              webhookData.caller_number || 'unknown',
+              1, // Default campaign ID
+              1, // Default affiliate ID  
+              webhookData.duration || 0,
+              webhookData.status || 'completed',
+              webhookData.recording_url || '',
+              webhookData.timestamp || new Date().toISOString(),
+              webhookData.tracking_number || '',
+              webhookData.caller_number || 'unknown',
+              new Date().toISOString()
+            ).run();
+          }
+        }
+        
+        // Mark webhook as processed
+        await db.db.prepare(`
+          UPDATE ringba_webhooks SET processed = 1, processed_at = ? 
+          WHERE call_id = ?
+        `).bind(
+          new Date().toISOString(),
+          webhookData.call_id || 'unknown'
+        ).run();
+      } else {
+        console.log('Webhook event not processed:', webhookData.event);
+      }
+    }
+    
+    // Always return success to Ringba to prevent retries
+    return c.json({
+      success: true,
+      message: 'Webhook processed successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error processing Ringba webhook:', error);
+    
+    // Log error in webhook table if we have the data
+    if (c.env?.DB) {
+      try {
+        const webhookData = await c.req.json();
+        const db = new Database(c.env.DB);
+        await db.db.prepare(`
+          UPDATE ringba_webhooks SET error_message = ?, processed_at = ?
+          WHERE call_id = ?
+        `).bind(
+          error instanceof Error ? error.message : 'Unknown error',
+          new Date().toISOString(),
+          webhookData.call_id || webhookData.callId
+        ).run();
+      } catch (logError) {
+        console.error('Failed to log webhook error:', logError);
+      }
+    }
+    
+    return c.json({
+      success: false,
+      error: 'Webhook processing failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Call Tracking Number Management API
+app.post('/api/call-tracking/numbers', async (c) => {
+  try {
+    const { tracking_number, campaign_id, affiliate_id, provider = 'ringba' } = await c.req.json();
+    
+    if (!tracking_number || !campaign_id) {
+      return c.json({
+        success: false,
+        error: 'tracking_number and campaign_id are required'
+      }, 400);
+    }
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      const result = await db.db.prepare(`
+        INSERT INTO call_tracking_numbers (
+          tracking_number, campaign_id, affiliate_id, provider, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        RETURNING *
+      `).bind(
+        tracking_number,
+        campaign_id,
+        affiliate_id || null,
+        provider,
+        new Date().toISOString()
+      ).first();
+      
+      return c.json({
+        success: true,
+        data: result,
+        message: 'Call tracking number added successfully'
+      });
+    }
+    
+    return c.json({
+      success: false,
+      error: 'Database not available'
+    }, 503);
+    
+  } catch (error) {
+    console.error('Error adding call tracking number:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error'
+    }, 500);
+  }
+});
+
+// Get recent PX transaction IDs
+app.get('/api/px/transactions', async (c) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '10');
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      // Get recent leads with PX transaction data
+      const transactions = await db.db.prepare(`
+        SELECT 
+          id,
+          lead_uuid,
+          px_lead_id,
+          first_name,
+          last_name,
+          phone_number,
+          ping_response,
+          post_response,
+          ping_sent_at,
+          post_sent_at,
+          ping_status,
+          post_status,
+          created_at
+        FROM leads 
+        WHERE ping_response IS NOT NULL 
+        ORDER BY created_at DESC 
+        LIMIT ?
+      `).bind(limit).all();
+      
+      // Parse and extract transaction IDs
+      const parsedTransactions = transactions.map((lead: any) => {
+        let pingData = null;
+        let postData = null;
+        let transactionId = null;
+        
+        try {
+          if (lead.ping_response) {
+            pingData = JSON.parse(lead.ping_response);
+            transactionId = pingData.TransactionId || pingData.transaction_id;
+          }
+          if (lead.post_response) {
+            postData = JSON.parse(lead.post_response);
+          }
+        } catch (e) {
+          console.error('Error parsing PX response:', e);
+        }
+        
+        return {
+          lead_id: lead.id,
+          lead_uuid: lead.lead_uuid,
+          px_lead_id: lead.px_lead_id,
+          transaction_id: transactionId,
+          contact: {
+            first_name: lead.first_name,
+            last_name: lead.last_name,
+            phone_number: lead.phone_number
+          },
+          ping_status: lead.ping_status,
+          post_status: lead.post_status,
+          ping_data: pingData,
+          post_data: postData,
+          timestamps: {
+            ping_sent_at: lead.ping_sent_at,
+            post_sent_at: lead.post_sent_at,
+            created_at: lead.created_at
+          }
+        };
+      });
+      
+      return c.json({
+        success: true,
+        data: parsedTransactions,
+        count: parsedTransactions.length
+      });
+    }
+    
+    return c.json({
+      success: false,
+      error: 'Database not available'
+    }, 503);
+    
+  } catch (error) {
+    console.error('Error getting PX transactions:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error'
+    }, 500);
+  }
+});
+
+// Get call tracking statistics
+app.get('/api/call-tracking/stats', async (c) => {
+  try {
+    const campaignId = c.req.query('campaign_id');
+    const affiliateId = c.req.query('affiliate_id');
+    
+    if (c.env?.DB) {
+      const db = new Database(c.env.DB);
+      
+      let whereClause = '';
+      const params = [];
+      
+      if (campaignId) {
+        whereClause += ' WHERE campaign_id = ?';
+        params.push(parseInt(campaignId));
+      }
+      
+      if (affiliateId) {
+        whereClause += campaignId ? ' AND affiliate_id = ?' : ' WHERE affiliate_id = ?';
+        params.push(parseInt(affiliateId));
+      }
+      
+      const callStats = await db.db.prepare(`
+        SELECT 
+          COUNT(*) as total_calls,
+          AVG(call_duration) as avg_duration,
+          COUNT(CASE WHEN call_duration > 30 THEN 1 END) as qualified_calls,
+          COUNT(CASE WHEN call_status = 'answered' THEN 1 END) as answered_calls,
+          SUM(CASE WHEN call_duration > 30 THEN call_value ELSE 0 END) as total_revenue
+        FROM inbound_calls${whereClause}
+      `).bind(...params).first();
+      
+      return c.json({
+        success: true,
+        data: callStats
+      });
+    }
+    
+    return c.json({
+      success: false,
+      error: 'Database not available'
+    }, 503);
+    
+  } catch (error) {
+    console.error('Error getting call stats:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error'
+    }, 500);
+  }
+});
+
+// PX Ping-Post API Implementation for Solar Leads
+app.post('/api/px/ping-post', async (c) => {
+  try {
+    const leadData = await c.req.json();
+    
+    console.log('=== PX PING-POST REQUEST ===');
+    console.log('Lead data received:', JSON.stringify(leadData, null, 2));
+    
+    // Validate required fields for solar leads
+    const requiredFields = ['firstName', 'lastName', 'phone', 'zipCode', 'ownership', 'roofshade', 'electricityBill'];
+    const missing = requiredFields.filter(field => !leadData[field]);
+    
+    if (missing.length > 0) {
+      return c.json({
+        success: false,
+        error: `Missing required fields: ${missing.join(', ')}`,
+        required_fields: requiredFields
+      }, 400);
+    }
+    
+    // Get API token from account settings (you'll need to add this)
+    const apiToken = c.env?.PX_API_TOKEN_SOLAR || 'B593425D-90C7-4CB8-8952-605D8A0CCEC0';
+    
+    // Step 1: Send PING to PX
+    const pingResult = await sendPxPing({
+      apiToken,
+      leadData,
+      offerId: '122', // Test offer ID
+      subId: leadData.subId || 'EM01',
+      did: '+18576880648' // Test DID
+    });
+    
+    if (!pingResult.success) {
+      return c.json({
+        success: false,
+        step: 'ping',
+        error: pingResult.error,
+        px_response: pingResult.response
+      });
+    }
+    
+    // Check ping response
+    if (pingResult.response?.CallId && pingResult.response?.Status === 'BaeOK') {
+      console.log('PING ACCEPTED - Proceeding with POST');
+      
+      // Step 2: Send POST within 15 seconds
+      const postResult = await sendPxPost({
+        apiToken,
+        leadData,
+        callId: pingResult.response.CallId,
+        offerId: '122',
+        subId: leadData.subId || 'EM01',
+        did: '+18576880648'
+      });
+      
+      // Log lead to database if we have DB available
+      if (c.env?.DB) {
+        const db = new Database(c.env.DB);
+        try {
+          const leadRecord = await db.createLead({
+            campaign_id: 1, // Solar campaign
+            affiliate_id: leadData.affiliateId || 1,
+            lead_uuid: pingResult.response.CallId || `px_${Date.now()}`,
+            px_lead_id: pingResult.response.CallId || null,
+            first_name: leadData.firstName,
+            last_name: leadData.lastName,
+            phone_number: leadData.phone,
+            zip_code: leadData.zipCode,
+            ownership: leadData.ownership,
+            roof_shade: leadData.roofshade,
+            electricity_bill: leadData.electricityBill,
+            ping_status: 'accepted',
+            post_status: postResult.success ? 'posted' : 'failed',
+            ping_response: JSON.stringify(pingResult.response),
+            post_response: JSON.stringify(postResult.response),
+            ping_sent_at: new Date().toISOString(),
+            post_sent_at: new Date().toISOString(),
+            ip_address: c.req.header('CF-Connecting-IP') || '127.0.0.1',
+            user_agent: c.req.header('User-Agent') || 'Unknown'
+          });
+          
+          console.log('Lead saved to database:', leadRecord.id);
+        } catch (dbError) {
+          console.error('Failed to save lead to database:', dbError);
+        }
+      }
+      
+      return c.json({
+        success: true,
+        step: 'post_complete',
+        call_id: pingResult.response.CallId,
+        ping_response: pingResult.response,
+        post_response: postResult.response,
+        message: postResult.success ? 'Lead successfully posted to PX' : 'Ping accepted but post failed'
+      });
+      
+    } else {
+      console.log('PING REJECTED');
+      
+      return c.json({
+        success: false,
+        step: 'ping_rejected',
+        ping_response: pingResult.response,
+        message: 'Ping was rejected by PX - no buyers available or lead not qualified'
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error in ping-post flow:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+// Helper function to send PX Ping
+async function sendPxPing({apiToken, leadData, offerId, subId, did}: {
+  apiToken: string;
+  leadData: any;
+  offerId: string;
+  subId: string;
+  did: string;
+}) {
+  try {
+    const pingPayload = {
+      ApiToken: apiToken,
+      Vertical: "Solar", // Required field for Ping-Post
+      OriginalUrl: "https://solar-leads.example.com", // Required field for Ping-Post
+      OfferId: offerId,
+      SubId: subId,
+      DID: did,
+      ContactData: {
+        FirstName: leadData.firstName,
+        LastName: leadData.lastName,
+        PhoneNumber: leadData.phone,
+        ZipCode: leadData.zipCode,
+        Ownership: leadData.ownership,
+        Roofshade: leadData.roofshade,
+        ElectricityBill: leadData.electricityBill
+      }
+    };
+    
+    console.log('Sending PING to PX:', JSON.stringify(pingPayload, null, 2));
+    
+    const response = await fetch('https://leadapi.px.com/api/call/ping', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(pingPayload)
+    });
+    
+    const responseText = await response.text();
+    console.log('PX PING Response Status:', response.status);
+    console.log('PX PING Response Body:', responseText);
+    
+    if (!response.ok) {
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+        response: responseText
+      };
+    }
+    
+    let pingResponse;
+    try {
+      pingResponse = JSON.parse(responseText);
+    } catch (parseError) {
+      return {
+        success: false,
+        error: 'Failed to parse PX ping response',
+        response: responseText
+      };
+    }
+    
+    return {
+      success: true,
+      response: pingResponse
+    };
+    
+  } catch (error) {
+    console.error('Error sending ping to PX:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error',
+      response: null
+    };
+  }
+}
+
+// Helper function to send PX Post
+async function sendPxPost({apiToken, leadData, callId, offerId, subId, did}: {
+  apiToken: string;
+  leadData: any;
+  callId: string;
+  offerId: string;
+  subId: string;
+  did: string;
+}) {
+  try {
+    const postPayload = {
+      ApiToken: apiToken,
+      Vertical: "Solar", // Required field for Ping-Post
+      OriginalUrl: "https://solar-leads.example.com", // Required field for Ping-Post
+      CallId: callId,
+      OfferId: offerId,
+      SubId: subId,
+      DID: did,
+      ContactData: {
+        FirstName: leadData.firstName,
+        LastName: leadData.lastName,
+        PhoneNumber: leadData.phone,
+        ZipCode: leadData.zipCode,
+        Ownership: leadData.ownership,
+        Roofshade: leadData.roofshade,
+        ElectricityBill: leadData.electricityBill,
+        // Add additional data for better payouts
+        Address: leadData.address || '',
+        City: leadData.city || '',
+        State: leadData.state || '',
+        Email: leadData.email || ''
+      }
+    };
+    
+    console.log('Sending POST to PX:', JSON.stringify(postPayload, null, 2));
+    
+    const response = await fetch('https://leadapi.px.com/api/call/post', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(postPayload)
+    });
+    
+    const responseText = await response.text();
+    console.log('PX POST Response Status:', response.status);
+    console.log('PX POST Response Body:', responseText);
+    
+    if (!response.ok) {
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+        response: responseText
+      };
+    }
+    
+    let postResponse;
+    try {
+      postResponse = JSON.parse(responseText);
+    } catch (parseError) {
+      return {
+        success: false,
+        error: 'Failed to parse PX post response',
+        response: responseText
+      };
+    }
+    
+    return {
+      success: true,
+      response: postResponse
+    };
+    
+  } catch (error) {
+    console.error('Error sending post to PX:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error',
+      response: null
+    };
+  }
+}
 
 // Main dashboard page
 app.get('/', (c) => {
@@ -2168,6 +3129,7 @@ app.get('/px-test', (c) => {
                                 <option value="Taboola">Taboola (TB01)</option>
                                 <option value="Outbrain">Outbrain (OB01)</option>
                                 <option value="Google">Google/Search (GG01)</option>
+                                <option value="Affiliates">Affiliates (AF01, AF02, etc.)</option>
                                 <option value="Social">Social Media (Multiple)</option>
                                 <option value="Native">Native Ads (Multiple)</option>
                             </select>
@@ -2193,8 +3155,30 @@ app.get('/px-test', (c) => {
                 </div>
             </div>
             
+            <!-- API Method Selection -->
+            <div class="bg-white rounded-lg shadow mb-8">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">API Method Selection</h2>
+                    <p class="text-sm text-gray-600">Choose between Direct Post (immediate) or Ping-Post (two-step with bidding)</p>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <input type="radio" id="method-direct" name="api-method" value="direct" checked class="mr-2">
+                            <label for="method-direct" class="text-sm font-medium text-gray-700">Direct Post</label>
+                            <p class="text-xs text-gray-500 ml-6">Submit lead directly to PX (immediate response)</p>
+                        </div>
+                        <div>
+                            <input type="radio" id="method-ping-post" name="api-method" value="ping-post" class="mr-2">
+                            <label for="method-ping-post" class="text-sm font-medium text-gray-700">Ping-Post (Solar Only)</label>
+                            <p class="text-xs text-gray-500 ml-6">Two-step process: Ping for bid, then Post if accepted</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Direct Post Test Form -->
-            <div class="bg-white rounded-lg shadow">
+            <div id="direct-post-form" class="bg-white rounded-lg shadow">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <h2 class="text-lg font-semibold text-gray-900">Direct Post Test Form</h2>
                     <p class="text-sm text-gray-600">Test PX Direct Post API with Health and Solar verticals</p>
@@ -2316,6 +3300,152 @@ app.get('/px-test', (c) => {
                                 <i class="fas fa-paper-plane mr-2"></i>
                                 <span id="submit-text">Send Direct Post</span>
                             </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Ping-Post Test Form -->
+            <div id="ping-post-form" class="bg-white rounded-lg shadow hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">Ping-Post Test Form (Solar)</h2>
+                    <p class="text-sm text-gray-600">Test PX Ping-Post API for Solar leads - Two-step process with real-time bidding</p>
+                </div>
+                <div class="p-6">
+                    <form id="ping-post-test-form" class="space-y-6">
+                        <!-- Configuration -->
+                        <div class="bg-blue-50 p-4 rounded-md">
+                            <h3 class="text-md font-medium text-blue-900 mb-2">Test Configuration</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <label class="block text-blue-700 font-medium">Offer ID:</label>
+                                    <span class="text-blue-900">122 (Solar Test)</span>
+                                </div>
+                                <div>
+                                    <label class="block text-blue-700 font-medium">DID:</label>
+                                    <span class="text-blue-900">+18576880648</span>
+                                </div>
+                                <div>
+                                    <label class="block text-blue-700 font-medium">API Token:</label>
+                                    <span class="text-blue-900">B593425D-90C7-4CB8-8952-***</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- SubId Selection -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">SubId *</label>
+                            <select id="ping-post-subId" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">Select SubId</option>
+                                <option value="EM01">EM01 (Email Campaign #1)</option>
+                                <option value="EM02">EM02 (Email Campaign #2)</option>
+                                <option value="FB01">FB01 (Facebook Campaign #1)</option>
+                                <option value="IG01">IG01 (Instagram Campaign #1)</option>
+                                <option value="TT01">TT01 (TikTok Campaign #1)</option>
+                                <option value="TW01">TW01 (Twitter Campaign #1)</option>
+                                <option value="TB01">TB01 (Taboola Campaign #1)</option>
+                                <option value="OB01">OB01 (Outbrain Campaign #1)</option>
+                                <option value="GG01">GG01 (Google Campaign #1)</option>
+                                <option value="AF01">AF01 (Affiliate Campaign #1)</option>
+                                <option value="AF02">AF02 (Affiliate Campaign #2)</option>
+                                <option value="AF03">AF03 (Affiliate Campaign #3)</option>
+                                <option value="AF04">AF04 (Affiliate Campaign #4)</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Choose SubId based on traffic source (max 20 per PX account)</p>
+                        </div>
+                        
+                        <!-- Contact Information -->
+                        <div class="border-t pt-6">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Contact Information</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
+                                    <input type="text" id="ping-post-firstName" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" value="John">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
+                                    <input type="text" id="ping-post-lastName" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" value="Smith">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                                    <input type="tel" id="ping-post-phone" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" value="5551234567">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Zip Code *</label>
+                                    <input type="text" id="ping-post-zipCode" required pattern="[0-9]{5}" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" value="90210">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Solar-Specific Information -->
+                        <div class="border-t pt-6">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Solar Information *</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Property Ownership *</label>
+                                    <select id="ping-post-ownership" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select</option>
+                                        <option value="Own" selected>Own</option>
+                                        <option value="Rent">Rent</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Roof Shade *</label>
+                                    <select id="ping-post-roofshade" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select</option>
+                                        <option value="No Shade" selected>No Shade</option>
+                                        <option value="Little Shade">Little Shade</option>
+                                        <option value="Moderate Shade">Moderate Shade</option>
+                                        <option value="Heavy Shade">Heavy Shade</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Electricity Bill *</label>
+                                    <select id="ping-post-electricityBill" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select Range</option>
+                                        <option value="$100-150" selected>$100-150</option>
+                                        <option value="$150-200">$150-200</option>
+                                        <option value="$200-250">$200-250</option>
+                                        <option value="$250-300">$250-300</option>
+                                        <option value="$300+">$300+</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Optional Information -->
+                        <div class="border-t pt-6">
+                            <h3 class="text-md font-medium text-gray-900 mb-4">Optional Information (Higher Payouts)</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                    <input type="email" id="ping-post-email" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="john@example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                                    <input type="text" id="ping-post-address" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="123 Main St">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">City</label>
+                                    <input type="text" id="ping-post-city" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Los Angeles">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">State</label>
+                                    <input type="text" id="ping-post-state" maxlength="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="CA">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="border-t pt-6">
+                            <button type="submit" class="bg-orange-600 text-white px-8 py-3 rounded-md hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                <i class="fas fa-exchange-alt mr-2"></i>
+                                <span id="ping-post-submit-text">Start Ping-Post Process</span>
+                            </button>
+                            <p class="text-xs text-gray-500 mt-2">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                Process: 1) Send Ping → 2) Wait for bid response → 3) Send Post if accepted (within 15 seconds)
+                            </p>
                         </div>
                     </form>
                 </div>

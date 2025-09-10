@@ -1,0 +1,28 @@
+{
+  "vertical": "Health",
+  "subId": "HH01",
+  "source": "Health Insurance Test",
+  "contact": {
+    "firstName": "Sarah",
+    "lastName": "Johnson",
+    "email": "sarah.johnson@example.com", 
+    "phone": "+15552345678",
+    "zipCode": "10001",
+    "address": "456 Health Ave",
+    "city": "New York",
+    "state": "NY"
+  },
+  "context": {
+    "sessionLength": 240,
+    "tcpaText": "I consent to receive calls and texts about health insurance options and understand this is not required for enrollment.",
+    "clickId": "health_test_click_456",
+    "ipAddress": "192.168.1.101", 
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  },
+  "extras": {
+    "DateOfBirth": "1985-06-15",
+    "Gender": "Female",
+    "Height": "5'6\"",
+    "Weight": "140 lbs"
+  }
+}

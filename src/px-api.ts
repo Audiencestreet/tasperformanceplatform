@@ -1,5 +1,39 @@
-// PX API Direct Post Implementation
-// Based on PX Direct Post specification for Health and Solar verticals
+/**
+ * =============================================================================
+ * PX API DIRECT POST IMPLEMENTATION
+ * =============================================================================
+ * 
+ * Complete implementation of PX Direct Post API for affiliate lead submission.
+ * Supports Solar (Offer ID: 122), Health, and Home verticals with proper
+ * field mapping, validation, and response handling.
+ * 
+ * @author Affiliate Tracking System
+ * @version 1.0.0
+ * @see https://leadapi.px.com/api/lead/directpost
+ * 
+ * SUPPORTED VERTICALS:
+ * - Solar: Complete residential solar qualification
+ * - Health: Individual health insurance leads  
+ * - Home: Home security and improvement leads
+ * 
+ * SUBID STRATEGY (≤20 total per PX account):
+ * - AF01-AF04: Affiliate network traffic
+ * - EM01-EM02: Email marketing campaigns
+ * - FB01: Facebook advertising
+ * - IG01: Instagram advertising
+ * - GG01: Google Ads campaigns
+ * - TB01: Taboola native advertising
+ * - OB01: Outbrain native advertising
+ * - HH01: Health-specific campaigns
+ * 
+ * CAMPAIGN STRUCTURE:
+ * Each campaign maps to specific offer IDs and payout structures:
+ * - Solar campaigns use Offer ID 122 with $25-30 payouts
+ * - ADT Home Security uses Offer ID 477 with $60 payouts
+ * - Health campaigns use HEALTH_* offer IDs with $35-40 payouts
+ * 
+ * =============================================================================
+ */
 
 export interface PXDirectPostRequest {
   // Required API Token
@@ -706,7 +740,45 @@ export class PXAPIClient {
   
   /**
    * Generate a valid SubId from traffic type and campaign number
-   * Updated mapping based on PX SubId strategy (≤20 total per account)
+   * 
+   * PX SUBID STRATEGY (Maximum 20 SubIDs per account):
+   * 
+   * TRAFFIC SOURCE MAPPING:
+   * - Affiliates (AF01-AF04): Primary affiliate network traffic
+   *   - AF01: Tier 1 affiliates (highest quality)
+   *   - AF02: Tier 2 affiliates (secondary networks)
+   *   - AF03: Specialized campaigns (e.g., ADT Home Security)
+   *   - AF04: Testing and backup traffic
+   * 
+   * - Email Marketing (EM01-EM02):
+   *   - EM01: Primary email lists and newsletters
+   *   - EM02: Secondary lists and A/B testing
+   * 
+   * - Social Media (Platform-Specific):
+   *   - FB01: Facebook advertising campaigns
+   *   - IG01: Instagram advertising campaigns
+   *   - TT01: TikTok advertising campaigns
+   *   - TW01: Twitter advertising campaigns
+   * 
+   * - Search Engine Marketing:
+   *   - GG01: Google Ads search campaigns
+   * 
+   * - Native Advertising:
+   *   - TB01: Taboola content recommendation
+   *   - OB01: Outbrain content recommendation
+   * 
+   * - Vertical-Specific:
+   *   - HH01: Health insurance campaigns
+   * 
+   * VALIDATION RULES:
+   * - Maximum 20 characters total
+   * - No special characters: ; \ / ' " ,
+   * - Alphanumeric and underscores only
+   * - Case sensitive (use uppercase)
+   * 
+   * @param trafficType The source of traffic (Email, Affiliates, Facebook, etc.)
+   * @param campaignNumber Optional campaign number for multiple campaigns per type
+   * @returns Generated SubID string following PX requirements
    */
   static generateSubId(trafficType: string, campaignNumber?: number): string {
     const typeMap: Record<string, string[]> = {
@@ -719,6 +791,7 @@ export class PXAPIClient {
       'Outbrain': ['OB01'],
       'Google': ['GG01'],
       'Search': ['GG01'],
+      'Affiliates': ['AF01', 'AF02', 'AF03', 'AF04'],
       'Social': ['FB01', 'IG01', 'TT01', 'TW01'],
       'Native': ['TB01', 'OB01']
     };
@@ -749,6 +822,7 @@ export class PXAPIClient {
       'Outbrain': ['OB01'],
       'Google': ['GG01'],
       'Search': ['GG01'],
+      'Affiliates': ['AF01', 'AF02', 'AF03', 'AF04'],
       'Social': ['FB01', 'IG01', 'TT01', 'TW01'],
       'Native': ['TB01', 'OB01']
     };
@@ -770,6 +844,7 @@ export class PXAPIClient {
       'Outbrain': ['OB01'],
       'Google': ['GG01'],
       'Search': ['GG01'],
+      'Affiliates': ['AF01', 'AF02', 'AF03', 'AF04'],
       'Social': ['FB01', 'IG01', 'TT01', 'TW01'],
       'Native': ['TB01', 'OB01']
     };
